@@ -1,5 +1,3 @@
-Initial Comments
-
 This is a bare bones solution accelerator for AI/BI Genie Spaces for Games.
 Unlike our other solution accelerators there are no notebooks to run, outside of ingesting the WoW Kaggle Dataset if you'd like to use a games specific example dataset
 All actions, otherwise, are done through the GUI here.
