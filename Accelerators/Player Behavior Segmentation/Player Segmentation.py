@@ -8,7 +8,7 @@
 # MAGIC
 # MAGIC 1. **Data Loading**: The player data is loaded from a CSV file, with schema inference enabled to detect data types automatically.
 # MAGIC
-# MAGIC 2. **Feature Selection**: Non-feature columns such as 'Xuid', 'Year', and 'Month' are removed from the dataset, retaining only the columns relevant for clustering.
+# MAGIC 2. **Feature Selection**: Non-feature columns such as 'Xuid', 'Year', and 'Month' are removed from the dataset, retaining only the columns relevant for clustering. Leaving only behavior related data points.
 # MAGIC
 # MAGIC 3. **Feature Engineering**:
 # MAGIC     - **Vector Assembly**: The selected features are assembled into a single vector.
@@ -86,6 +86,7 @@ from pyspark.sql.types import StructType, StructField, StringType, DoubleType, L
 
 # MAGIC %md
 # MAGIC Replace the api_key with your access token. Generate the token using your profile in the top right.
+# MAGIC https://docs.databricks.com/en/dev-tools/auth/pat.html
 # MAGIC
 # MAGIC Replace the base_url with your workspace url keeping the /serving-endpoints after
 
