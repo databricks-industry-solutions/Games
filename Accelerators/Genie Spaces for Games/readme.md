@@ -1,13 +1,18 @@
-**Initial Comments
+Initial Comments
+
 This is a bare bones solution accelerator for AI/BI Genie Spaces for Games.
 Unlike our other solution accelerators there are no notebooks to run, outside of ingesting the WoW Kaggle Dataset if you'd like to use a games specific example dataset
 All actions, otherwise, are done through the GUI here.
 It will be easier to use your own datasets, however, as part of your exploration of this capability.
 
+
 This Solution Accelerator is related to this blog post: ______
+
+
 Valuable Documentation:
 - What is a Genie Space and how to set it up: https://docs.databricks.com/en/genie/index.html
 - How to onboard your space: https://www.databricks.com/blog/onboarding-your-new-aibi-genie
+
 
 For this solution accelerator take the following steps:
 1. (optional) Import WoW Kaggle Dataset by running this notebook: _______
