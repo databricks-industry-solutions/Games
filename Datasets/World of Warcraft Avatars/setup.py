@@ -1,5 +1,41 @@
 # Databricks notebook source
-# MAGIC %run "./notebook_config"
+dbutils.widgets.text("K_Username", "")
+dbutils.widgets.text("K_Key", "")
+
+# COMMAND ----------
+
+# MAGIC %run "../../config/environment_config"
+
+# COMMAND ----------
+
+# MAGIC %pip install kaggle
+
+# COMMAND ----------
+
+import re
+import os
+import json
+import sys
+from pyspark.sql import functions as F
+from pyspark.sql.window import Window
+from pyspark.sql.types import *
+
+from pyspark.sql import functions as F
+
+# COMMAND ----------
+
+database_name = f"World_Of_Warcraft_Avatars"
+database_location = f"{tmpdir}games"
+
+spark.sql(f"CREATE DATABASE IF NOT EXISTS {database_name}")
+spark.sql(f"USE {database_name}")
+
+print(f"Database Name: {database_name}")
+
+# COMMAND ----------
+
+os.environ['KAGGLE_USERNAME'] = "{K_Username}" # replace with your own credential here temporarily or set up a secret scope with your credential
+os.environ['KAGGLE_KEY'] = "{K_Key}" # replace with your own credential here temporarily or set up a secret scope with your credential
 
 # COMMAND ----------
 
