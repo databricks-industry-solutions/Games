@@ -43,20 +43,10 @@
 
 # COMMAND ----------
 
-
-import os
-
-# COMMAND ----------
-
 tmpdir = f"/dbfs/tmp/games_solutions/"
 tmpdir_dbfs = f"/tmp/games_solutions"
 catalog_name = f"games_solutions"
 os.environ['tmpdir'] = tmpdir
-
-# COMMAND ----------
-
-os.environ['KAGGLE_USERNAME'] = "theduncandavis" # replace with your own credential here temporarily or set up a secret scope with your credential
-os.environ['KAGGLE_KEY'] = "5024c83c25f61488935ee2fc4426da72" # replace with your own credential here temporarily or set up a secret scope with your credential
 
 # COMMAND ----------
 
@@ -69,12 +59,6 @@ if not catalog_exists:
 
 # Set catalog
 _ = spark.sql(f"USE CATALOG {catalog_name}")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC spark.sql(f"CREATE DATABASE IF NOT EXISTS {database_name}")
-# MAGIC spark.sql(f"USE {database_name}")
 
 # COMMAND ----------
 

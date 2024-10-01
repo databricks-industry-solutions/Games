@@ -8,6 +8,36 @@
 
 # COMMAND ----------
 
+from pyspark.sql import functions as F
+from pyspark.sql.window import Window
+from pyspark.sql.types import *
+
+import numpy as np
+from hyperopt import fmin, tpe, hp, Trials, STATUS_OK
+
+from pyspark.ml import Pipeline
+from pyspark.ml.classification import RandomForestClassifier,GBTClassifier
+from pyspark.ml.feature import StringIndexer, VectorIndexer, VectorAssembler
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+
+import sparknlp
+from sparknlp.annotator import *
+from sparknlp.common import *
+from sparknlp.base import *
+
+from pyspark.ml import Pipeline
+from pyspark.mllib.evaluation import MultilabelMetrics
+from pyspark.sql.functions import lit,when,col,array,array_contains,array_remove,regexp_replace,size,when
+from pyspark.sql.types import ArrayType,DoubleType,StringType
+
+from pyspark.ml.evaluation import MultilabelClassificationEvaluator
+
+import mlflow
+import mlflow.spark
+from mlflow.tracking import MlflowClient
+
+# COMMAND ----------
+
 # MAGIC %md #Model Development
 
 # COMMAND ----------
@@ -21,7 +51,7 @@
 
 mlflow.autolog()
 
-player_session_df = spark.read.table('`duncan`.`gamer-lifecycle`.`gld_wow_player_session_agg`')\
+player_session_df = spark.read.table('games_solutions.world_of_warcraft_avatars.gld_wow_player_session_agg')\
     .withColumn("churned", F.when(
         (F.lag(F.col("session_gap"), -1).over(Window.partitionBy("char").orderBy("start_timestamp"))) >= 30000, 1
     ).otherwise(0))
@@ -183,8 +213,8 @@ stage = 'production'
 
 loaded_model = mlflow.pyfunc.spark_udf(spark, model_uri=f"models:/{model_name}/{stage}")
 
-player_sessions_df = spark.read.table(f"hive_metastore.{database_name}.GLD_wow_player_session_agg")
+player_sessions_df = spark.read.table('games_solutions.world_of_warcraft_avatars.gld_wow_player_session_agg')
 player_churn_df = player_sessions_df.withColumn("prediction", loaded_model(F.struct(*player_sessions_df.columns))).filter(F.col("prediction") == 1)
 
-player_churn_df.select("char","sessionid","prediction").write.mode("overwrite").saveAsTable(f"hive_metastore.{database_name}.SLV_wow_player_churn_risk")
+player_churn_df.select("char","sessionid","prediction").write.mode("overwrite").saveAsTable('games_solutions.world_of_warcraft_avatars.SLV_wow_player_churn_risk')
 display(player_churn_df)
