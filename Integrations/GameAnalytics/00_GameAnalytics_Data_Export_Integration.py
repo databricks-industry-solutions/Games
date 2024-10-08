@@ -27,7 +27,7 @@
 
 # COMMAND ----------
 
-# MAGIC %run "./config"
+from config import *
 
 # COMMAND ----------
 
@@ -100,9 +100,9 @@ dbutils.widgets.text("S3_PATH", S3_PATH)
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC -- The subdirectory may be different.  Check the Volume using the Catalog Explorer to find a subdirectory to use for this test query.
+# MAGIC -- The subdirectory may be different. 
 # MAGIC SELECT *
-# MAGIC FROM json.`${S3_PATH}/raw/2024/08/05/17023/`
+# MAGIC FROM json.`${S3_PATH}/raw/2024/09/26/237761`
 
 # COMMAND ----------
 
