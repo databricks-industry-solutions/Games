@@ -31,9 +31,6 @@ from config import *
 
 # COMMAND ----------
 
-dbutils.widgets.text("CATALOG", CATALOG)
-dbutils.widgets.text("SCHEMA", SCHEMA)
-dbutils.widgets.text("VOLUME_NAME", VOLUME_NAME)
 dbutils.widgets.text("S3_PATH", S3_PATH)
 
 # COMMAND ----------
@@ -70,8 +67,8 @@ dbutils.widgets.text("S3_PATH", S3_PATH)
 
 # MAGIC %sql
 # MAGIC CREATE EXTERNAL LOCATION IF NOT EXISTS `game_analytics_data_export`
-# MAGIC URL '${S3_PATH}'
-# MAGIC WITH (STORAGE CREDENTIAL `one_env_external_location`)
+# MAGIC URL '${S3_PATH}' -- path to the S3 bucket used by GameAnalytics
+# MAGIC WITH (STORAGE CREDENTIAL `one_env_external_location`) -- name of storage credential created in Step 1
 # MAGIC COMMENT 's3 bucket for GameAnalytics DataSuite';
 
 # COMMAND ----------

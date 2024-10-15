@@ -9,12 +9,19 @@ from pyspark.sql.types import LongType, FloatType, StringType, TimestampType, Bo
 # MAGIC %md-sandbox
 # MAGIC # Overview
 # MAGIC
-# MAGIC Outline
-# MAGIC - Why we use mediallian architecture
-# MAGIC https://www.databricks.com/glossary/medallion-architecture
-# MAGIC <img src="./_resources/GameAnalytics Integration - Delta Live Tables.png" width="800"/>
+# MAGIC The Medallion Architecture is a data design pattern used to logically organize data in a lakehouse, with the goal of incrementally and progressively improving the structure and quality of data as it flows through each layer of the architecture. This architecture is divided into three layers: Bronze, Silver, and Gold
 # MAGIC
-# MAGIC - Breifly go through each hop
+# MAGIC - **Bronze Layer**: This layer is for raw data ingestion, storing data in its native format without any transformations. It acts as a dumping ground for raw data, ensuring no information is lost and providing a historical archive
+# MAGIC
+# MAGIC - **Silver Layer**: In this layer, data is cleansed and conformed. Minimal transformations and data cleansing rules are applied to ensure data quality and consistency. The Silver layer typically has more normalized data models, making it suitable for further processing and analysis.
+# MAGIC
+# MAGIC - **Gold Layer**: This layer contains curated, business-level aggregates of the Silver data. The data is in a format suitable for individual business projects or reports, often using de-normalized and read-optimized data models. The final layer of data transformations and data quality rules are applied here, making the data ready for consumption by BI tools and ML models.
+# MAGIC
+# MAGIC The benefits of using the Medallion Architecture for ELT pipelines include improved data quality, scalability, and query performance. By organizing data into optimized layers, the architecture ensures faster data retrieval and analysis, simplifies data governance, and provides granular access controls to ensure data security and compliance.
+# MAGIC
+# MAGIC This diagram shows how we will use the mediallian architecture to process data that is exported from GameAnlaytics to cloud storage.  We're going to add a **Raw** layer at the beginning of the pipeline to preserve the raw JSON as a string.
+# MAGIC
+# MAGIC <img src="./_resources/GameAnalytics Integration - Delta Live Tables.png" width="800"/>
 
 # COMMAND ----------
 
@@ -26,14 +33,14 @@ from pyspark.sql.types import LongType, FloatType, StringType, TimestampType, Bo
 # COMMAND ----------
 
 raw_schema = StructType([
-  StructField('value', StringType(), True, {"comment": "Payload of individual player events that GameAnalytics received and processes for your game"}),
-  StructField('source_metadata', StructType([
-        StructField('file_path', StringType(), True, {"comment": "File path of the input file."}),
-        StructField('file_name', StringType(), True, {"comment": "Name of the input file along with its extension."}),
-        StructField('file_size', LongType(), True, {"comment": "Length of the input file, in bytes."}),
-        StructField('file_block_start', LongType(), True, {"comment": "Start offset of the block being read, in bytes."}),
-        StructField('file_block_length', LongType(), True, {"comment": "Length of the block being read, in bytes."}),
-        StructField('file_modification_time', TimestampType(), True, {"comment": "Last modification timestamp of the input file."})
+  StructField("value", StringType(), True, {"comment": "Payload of individual player events that GameAnalytics received and processes for your game"}),
+  StructField("source_metadata", StructType([
+        StructField("file_path", StringType(), True, {"comment": "File path of the input file."}),
+        StructField("file_name", StringType(), True, {"comment": "Name of the input file along with its extension."}),
+        StructField("file_size", LongType(), True, {"comment": "Length of the input file, in bytes."}),
+        StructField("file_block_start", LongType(), True, {"comment": "Start offset of the block being read, in bytes."}),
+        StructField("file_block_length", LongType(), True, {"comment": "Length of the block being read, in bytes."}),
+        StructField("file_modification_time", TimestampType(), True, {"comment": "Last modification timestamp of the input file."})
     ]), True, {"comment": "Metadata information for input files"})
 ])
 
@@ -87,8 +94,8 @@ events_schema = StructType([
   StructField("data", StringType(), True, {"comment": "Event data"}), # will be variant type
   StructField("country_code", StringType(), True, {"comment": "Country code for the player's country based on events (please note this may change day on day if the player is travelling)"}),
   StructField("arrival_ts", LongType(), True, {"comment": "Timestamp for which the event arrived at GA (discrepancy might be for users being offline, for example)"}),
-  StructField('file_path', StringType(), True, {"comment": "File path of the input file."}),
-  StructField('file_modification_time', TimestampType(), True, {"comment": "Last modification timestamp of the input file."})
+  StructField("file_path", StringType(), True, {"comment": "File path of the input file."}),
+  StructField("file_modification_time", TimestampType(), True, {"comment": "Last modification timestamp of the input file."})
 ])
 
 
@@ -104,7 +111,6 @@ The events table parses out top level keys of the JSON payload.
 def events():
   return (
     dlt.read("raw")
-    # .withColumn("value", F.parse_json("value"))
       .withColumn("value", F.from_json("value", payload_schema))
       .withColumn("user_meta", F.col("value.user_meta"))
       .withColumn("ip", F.col("value.ip"))
@@ -135,15 +141,22 @@ def events():
 
 # COMMAND ----------
 
-user_meta_schema = StructType([
-    StructField("revenue", StringType(), True),
-    StructField("origin", StringType(), True),
-    StructField("is_converting", StringType(), True),
-    StructField("install_ts", LongType(), True),
-    StructField("install_hour", LongType(), True),
-    StructField("first_build", StringType(), True),
+session_end_user_meta_schema = StructType([
+    StructField("attribution_partner", StringType(), True),
+    StructField("cohort_month", LongType(), True),
     StructField("cohort_week", LongType(), True),
-    StructField("cohort_month", LongType(), True)
+    StructField("first_build", StringType(), True),
+    StructField("install_campaign", StringType(), True),
+    StructField("install_hour", LongType(), True),
+    StructField("install_adgroup", StringType(), True),
+    StructField("install_publisher", StringType(), True),
+    StructField("install_site", StringType(), True),
+    StructField("install_ts", LongType(), True),
+    StructField("is_converting", BooleanType(), True),
+    StructField("is_paying", BooleanType(), True),
+    StructField("origin", StringType(), True),
+    StructField("pay_ft", LongType(), True),
+    StructField("revenue", DoubleType(), True)
 ])
 
 session_end_data_schema = StructType([
@@ -158,6 +171,8 @@ session_end_data_schema = StructType([
     StructField("length", LongType(), True),
     StructField("device", StringType(), True),
     StructField("custom_01", StringType(), True),
+    StructField("custom_02", StringType(), True),
+    StructField("custom_03", StringType(), True),
     StructField("client_ts", LongType(), True),
     StructField("category", StringType(), True),
     StructField("build", StringType(), True)
@@ -169,9 +184,18 @@ session_end_schema = StructType([
     StructField("first_in_batch", BooleanType(), True, {"comment": ""}),
     StructField("country_code", StringType(), True, {"comment": "Country code for the player's country based on events (please note this may change day on day if the player is travelling)"}),
     StructField("arrival_ts", TimestampType(), True, {"comment": "Timestamp for which the event arrived at GA (discrepancy might be for users being offline, for example)"}),
-    StructField("revenue", StringType(), True, {"comment": ""}),
+    StructField("install_campaign", StringType(), True, {"comment": ""}),
+    StructField("install_adgroup", StringType(), True, {"comment": ""}),
+    StructField("install_publisher", StringType(), True, {"comment": ""}),
+    StructField("install_site", StringType(), True, {"comment": ""}),
+    StructField("is_paying", BooleanType(), True, {"comment": ""}),
+    StructField("origin", StringType(), True, {"comment": ""}),
+    StructField("pay_ft", LongType(), True, {"comment": ""}),
+    StructField("site_id", StringType(), True, {"comment": ""}),
+    StructField("attribution_partner", StringType(), True, {"comment": ""}),
+    StructField("revenue", DoubleType(), True, {"comment": ""}),
     StructField("cohort_month", StringType(), True, {"comment": "First day of the month the player installed the game	"}),
-    StructField("is_converting", StringType(), True, {"comment": "Flag indicating whether it's the first time the player is making a payment (since we have history of it)	"}),
+    StructField("is_converting", BooleanType(), True, {"comment": "Flag indicating whether it's the first time the player is making a payment (since we have history of it)	"}),
     StructField("cohort_week", StringType(), True, {"comment": "First day of the week the player installed the game	"}),
     StructField("first_build", StringType(), True, {"comment": ""}),
     StructField("install_ts", TimestampType(), True, {"comment": "Date the player installed the game"}),
@@ -184,6 +208,8 @@ session_end_schema = StructType([
     StructField("user_id", StringType(), True, {"comment": "Device identifier of the player (note the same user_id might be linked to multiple game_ids)	"}),
     StructField("v", IntegerType(), True, {"comment": "Reflects the version of events coming in to the collectors."}),
     StructField("custom_01", StringType(), True, {"comment": "Custom field 1"}),
+    StructField("custom_02", StringType(), True, {"comment": "Custom field 2"}),
+    StructField("custom_03", StringType(), True, {"comment": "Custom field 3"}),
     StructField("category", StringType(), True, {"comment": ""}),
     StructField("sdk_version", StringType(), True, {"comment": "SDK version"}),
     StructField("length", LongType(), True, {"comment": "Length of that session in seconds"}),
@@ -209,11 +235,17 @@ def session_end():
   return (
     dlt.read("events")
     .filter(F.col("data").contains('"category":"session_end"'))
-    .withColumn("user_meta", F.from_json("user_meta", user_meta_schema))
+    .withColumn("user_meta", F.from_json("user_meta", session_end_user_meta_schema))
     .withColumn("data", F.from_json("data", session_end_data_schema))
     .withColumn("arrival_ts", F.to_timestamp(F.from_unixtime(F.col("arrival_ts"))))
+    .withColumn("install_campaign", F.col("user_meta.install_campaign"))
+    .withColumn("install_site", F.col("user_meta.install_site"))
+    .withColumn("is_paying", F.col("user_meta.is_paying"))
+    .withColumn("origin", F.col("user_meta.origin"))
+    .withColumn("pay_ft", F.col("user_meta.pay_ft"))
+    .withColumn("attribution_partner", F.col("user_meta.attribution_partner"))
     .withColumn("revenue", F.col("user_meta.revenue"))
-    .withColumn("cohort_month", F.from_unixtime(F.col("user_meta.cohort_month"), 'yyyy-MM'))
+    .withColumn("cohort_month", F.from_unixtime(F.col("user_meta.cohort_month"), "yyyy-MM"))
     .withColumn("is_converting", F.col("user_meta.is_converting"))
     .withColumn("cohort_week", F.from_unixtime(F.col("user_meta.cohort_week")))
     .withColumn("first_build", F.col("user_meta.first_build"))
@@ -227,13 +259,15 @@ def session_end():
     .withColumn("user_id", F.col("data.user_id"))
     .withColumn("v", F.col("data.v"))
     .withColumn("custom_01", F.col("data.custom_01"))
+    .withColumn("custom_02", F.col("data.custom_02"))
+    .withColumn("custom_03", F.col("data.custom_03"))
     .withColumn("category", F.col("data.category"))
     .withColumn("sdk_version", F.col("data.sdk_version"))
     .withColumn("length", F.col("data.length"))
     .withColumn("manufacturer", F.col("data.manufacturer"))
     .withColumn("platform", F.col("data.platform"))
     .withColumn("device", F.col("data.device"))
-    .drop('file_path','file_modification_time','user_meta','data')
+    .drop("file_path","file_modification_time","user_meta","data")
   )
 
 # COMMAND ----------
@@ -243,15 +277,22 @@ def session_end():
 
 # COMMAND ----------
 
-user_meta_schema = StructType([
-    StructField("revenue", StringType(), True),
-    StructField("origin", StringType(), True),
-    StructField("is_converting", StringType(), True),
-    StructField("install_ts", LongType(), True),
-    StructField("install_hour", LongType(), True),
-    StructField("first_build", StringType(), True),
+user_user_meta_schema = StructType([
+    StructField("attribution_partner", StringType(), True),
+    StructField("cohort_month", LongType(), True),
     StructField("cohort_week", LongType(), True),
-    StructField("cohort_month", LongType(), True)
+    StructField("first_build", StringType(), True),
+    StructField("install_campaign", StringType(), True),
+    StructField("install_hour", LongType(), True),
+    StructField("install_adgroup", StringType(), True),
+    StructField("install_publisher", StringType(), True),
+    StructField("install_site", StringType(), True),
+    StructField("install_ts", LongType(), True),
+    StructField("is_converting", BooleanType(), True),
+    StructField("is_paying", BooleanType(), True),
+    StructField("origin", StringType(), True),
+    StructField("pay_ft", LongType(), True),
+    StructField("revenue", DoubleType(), True)
 ])
 
 user_data_schema = StructType([
@@ -265,9 +306,11 @@ user_data_schema = StructType([
     StructField("manufacturer", StringType(), True),
     StructField("device", StringType(), True),
     StructField("custom_01", StringType(), True),
+    StructField("custom_02", StringType(), True),
+    StructField("custom_03", StringType(), True),
     StructField("client_ts", LongType(), True),
     StructField("category", StringType(), True),
-    StructField("build", StringType(), True)
+    StructField("build", StringType(), True),
 ])
 
 user_schema = StructType([
@@ -276,9 +319,18 @@ user_schema = StructType([
     StructField("first_in_batch", BooleanType(), True, {"comment": ""}),
     StructField("country_code", StringType(), True, {"comment": "Country code for the player's country based on events (please note this may change day on day if the player is travelling)"}),
     StructField("arrival_ts", TimestampType(), True, {"comment": "Timestamp for which the event arrived at GA (discrepancy might be for users being offline, for example)"}),
-    StructField("revenue", StringType(), True, {"comment": ""}),
+    StructField("install_campaign", StringType(), True, {"comment": ""}),
+    StructField("install_adgroup", StringType(), True, {"comment": ""}),
+    StructField("install_publisher", StringType(), True, {"comment": ""}),
+    StructField("install_site", StringType(), True, {"comment": ""}),
+    StructField("is_paying", BooleanType(), True, {"comment": ""}),
+    StructField("origin", StringType(), True, {"comment": ""}),
+    StructField("pay_ft", LongType(), True, {"comment": ""}),
+    StructField("site_id", StringType(), True, {"comment": ""}),
+    StructField("attribution_partner", StringType(), True, {"comment": ""}),
+    StructField("revenue", DoubleType(), True, {"comment": ""}),
     StructField("cohort_month", StringType(), True, {"comment": "First day of the month the player installed the game	"}),
-    StructField("is_converting", StringType(), True, {"comment": "Flag indicating whether it's the first time the player is making a payment (since we have history of it)	"}),
+    StructField("is_converting", BooleanType(), True, {"comment": "Flag indicating whether it's the first time the player is making a payment (since we have history of it)	"}),
     StructField("cohort_week", StringType(), True, {"comment": "First day of the week the player installed the game	"}),
     StructField("first_build", StringType(), True, {"comment": ""}),
     StructField("install_ts", TimestampType(), True, {"comment": "Date the player installed the game"}),
@@ -291,6 +343,8 @@ user_schema = StructType([
     StructField("user_id", StringType(), True, {"comment": "Device identifier of the player (note the same user_id might be linked to multiple game_ids)	"}),
     StructField("v", IntegerType(), True, {"comment": "Reflects the version of events coming in to the collectors."}),
     StructField("custom_01", StringType(), True, {"comment": "Custom field 1"}),
+    StructField("custom_02", StringType(), True, {"comment": "Custom field 2"}),
+    StructField("custom_03", StringType(), True, {"comment": "Custom field 3"}),
     StructField("category", StringType(), True, {"comment": ""}),
     StructField("sdk_version", StringType(), True, {"comment": "SDK version"}),
     StructField("manufacturer", StringType(), True, {"comment": "Device's manufacturer"}),
@@ -314,12 +368,18 @@ Refer to GameAnalytics [documentation](https://restapidocs.gameanalytics.com/?js
 def user():
   return (
     dlt.read("events")
-    .filter(F.col("data").contains('"category":"user"'))
-    .withColumn("user_meta", F.from_json("user_meta", user_meta_schema))
+    .filter(F.col("data").contains('category":"user"'))
+    .withColumn("user_meta", F.from_json("user_meta", user_user_meta_schema))
     .withColumn("data", F.from_json("data", user_data_schema))
     .withColumn("arrival_ts", F.to_timestamp(F.from_unixtime(F.col("arrival_ts"))))
+    .withColumn("install_campaign", F.col("user_meta.install_campaign"))
+    .withColumn("install_site", F.col("user_meta.install_site"))
+    .withColumn("is_paying", F.col("user_meta.is_paying"))
+    .withColumn("origin", F.col("user_meta.origin"))
+    .withColumn("pay_ft", F.col("user_meta.pay_ft"))
+    .withColumn("attribution_partner", F.col("user_meta.attribution_partner"))
     .withColumn("revenue", F.col("user_meta.revenue"))
-    .withColumn("cohort_month", F.from_unixtime(F.col("user_meta.cohort_month"), 'yyyy-MM'))
+    .withColumn("cohort_month", F.from_unixtime(F.col("user_meta.cohort_month"), "yyyy-MM"))
     .withColumn("is_converting", F.col("user_meta.is_converting"))
     .withColumn("cohort_week", F.from_unixtime(F.col("user_meta.cohort_week")))
     .withColumn("first_build", F.col("user_meta.first_build"))
@@ -333,12 +393,14 @@ def user():
     .withColumn("user_id", F.col("data.user_id"))
     .withColumn("v", F.col("data.v"))
     .withColumn("custom_01", F.col("data.custom_01"))
+    .withColumn("custom_02", F.col("data.custom_02"))
+    .withColumn("custom_03", F.col("data.custom_03"))
     .withColumn("category", F.col("data.category"))
     .withColumn("sdk_version", F.col("data.sdk_version"))
     .withColumn("manufacturer", F.col("data.manufacturer"))
     .withColumn("platform", F.col("data.platform"))
     .withColumn("device", F.col("data.device"))
-    .drop('file_path','file_modification_time','user_meta','data')
+    .drop("file_path","file_modification_time","user_meta","data")
   )
 
 # COMMAND ----------
@@ -348,23 +410,22 @@ def user():
 
 # COMMAND ----------
 
-user_meta_schema = StructType([
+progression_user_meta_schema = StructType([
     StructField("attribution_partner", StringType(), True),
     StructField("cohort_month", LongType(), True),
     StructField("cohort_week", LongType(), True),
     StructField("first_build", StringType(), True),
     StructField("install_campaign", StringType(), True),
     StructField("install_hour", LongType(), True),
-    StructField("install_keyword", StringType(), True),
+    StructField("install_adgroup", StringType(), True),
     StructField("install_publisher", StringType(), True),
     StructField("install_site", StringType(), True),
     StructField("install_ts", LongType(), True),
-    StructField("is_converting", StringType(), True),
-    StructField("is_paying", StringType(), True),
+    StructField("is_converting", BooleanType(), True),
+    StructField("is_paying", BooleanType(), True),
     StructField("origin", StringType(), True),
     StructField("pay_ft", LongType(), True),
-    StructField("revenue", DoubleType(), True),
-    StructField("site_id", StringType(), True)
+    StructField("revenue", DoubleType(), True)
 ])
 
 progression_data_schema = StructType([
@@ -414,6 +475,9 @@ progression_data_schema = StructType([
     StructField("progression1", StringType(), True),
     StructField("progression2", StringType(), True),
     StructField("progression3", StringType(), True),
+    StructField("custom_01", StringType(), True),
+    StructField("custom_02", StringType(), True),
+    StructField("custom_03", StringType(), True),
 ])
 
 progression_schema = StructType([
@@ -423,17 +487,17 @@ progression_schema = StructType([
     StructField("country_code", StringType(), True, {"comment": "Country code for the player's country based on events (please note this may change day on day if the player is travelling)"}),
     StructField("arrival_ts", TimestampType(), True, {"comment": "Timestamp for which the event arrived at GA (discrepancy might be for users being offline, for example)"}),
     StructField("install_campaign", StringType(), True, {"comment": ""}),
-    StructField("install_keyword", StringType(), True, {"comment": ""}),
+    StructField("install_adgroup", StringType(), True, {"comment": ""}),
     StructField("install_publisher", StringType(), True, {"comment": ""}),
     StructField("install_site", StringType(), True, {"comment": ""}),
-    StructField("is_paying", StringType(), True, {"comment": ""}),
+    StructField("is_paying", BooleanType(), True, {"comment": ""}),
     StructField("origin", StringType(), True, {"comment": ""}),
     StructField("pay_ft", LongType(), True, {"comment": ""}),
     StructField("site_id", StringType(), True, {"comment": ""}),
     StructField("attribution_partner", StringType(), True, {"comment": ""}),
-    StructField("revenue", StringType(), True, {"comment": ""}),
+    StructField("revenue", DoubleType(), True, {"comment": ""}),
     StructField("cohort_month", StringType(), True, {"comment": "First day of the month the player installed the game	"}),
-    StructField("is_converting", StringType(), True, {"comment": "Flag indicating whether it's the first time the player is making a payment (since we have history of it)	"}),
+    StructField("is_converting", BooleanType(), True, {"comment": "Flag indicating whether it's the first time the player is making a payment (since we have history of it)	"}),
     StructField("cohort_week", StringType(), True, {"comment": "First day of the week the player installed the game	"}),
     StructField("first_build", StringType(), True, {"comment": ""}),
     StructField("install_ts", TimestampType(), True, {"comment": "Date the player installed the game"}),
@@ -460,12 +524,11 @@ progression_schema = StructType([
     StructField("android_id", StringType(), True, {"comment": "Android id	"}), #find a better defintion
     StructField("android_mac_md5", StringType(), True, {"comment": ""}),
     StructField("android_mac_sha1", StringType(), True, {"comment": ""}),
-    StructField("attempt_num", LongType(), True, {"comment": 'The number of attempts for this event id (event_id e.g. "Fail:Universe1:Planet1:Quest1")'}),
+    StructField("attempt_num", LongType(), True, {"comment": "The number of attempts for this event id (event_id e.g. \"Fail:Universe1:Planet1:Quest1\")"}),
     StructField("configuration_keys", ArrayType(StringType()), True, {"comment": ""}),
     StructField("configurations", ArrayType(StringType()), True, {"comment": ""}),
     StructField("connection_type", StringType(), True, {"comment": "connection, e.g. lan, wwan, wifi, offline	"}),
     StructField("engine_version", StringType(), True, {"comment": "engine version"}),
-    StructField("event_id", StringType(), True, {"comment": "A 2-4 part event id. [progressionStatus]:[progression1]:[progression2]:[progression3]"}),
     StructField("google_aid", StringType(), True, {"comment": "Android advertising id	"}),
     StructField("google_aid_src", StringType(), True, {"comment": ""}),
     StructField("ios_app_build", StringType(), True, {"comment": ""}),
@@ -484,6 +547,9 @@ progression_schema = StructType([
     StructField("progression_1", StringType(), True, {"comment": ""}),
     StructField("progression_2", StringType(), True, {"comment": ""}),
     StructField("progression_3", StringType(), True, {"comment": ""}),
+    StructField("custom_01", StringType(), True, {"comment": "Custom field 1"}),
+    StructField("custom_02", StringType(), True, {"comment": "Custom field 2"}),
+    StructField("custom_03", StringType(), True, {"comment": "Custom field 3"}),
     
 ])
 
@@ -498,24 +564,24 @@ Refer to GameAnalytics [documentation](https://docs.gameanalytics.com/event-type
   comment=progression_comment,
   schema=progression_schema
   )
-@dlt.expect_or_fail("valid_progression_status", "progression_status IN ('Start', 'Complete', 'Fail')")
+@dlt.expect_or_fail("valid_progression_status", "progression_status IN (\"Start\", \"Complete\", \"Fail\")")
 def progression():
   return (
     dlt.read("events")
     .filter(F.col("data").contains('"category":"progression"'))
-    .withColumn("user_meta", F.from_json("user_meta", user_meta_schema))
+    .withColumn("user_meta", F.from_json("user_meta", progression_user_meta_schema))
     .withColumn("data", F.from_json("data", progression_data_schema))
     .withColumn("arrival_ts", F.to_timestamp(F.from_unixtime(F.col("arrival_ts"))))
-    # .withColumn("install_campaign", F.col("user_meta.install_campaign"))
-    # .withColumn("install_keyword", F.col("user_meta.install_keyword"))
-    # .withColumn("install_site", F.col("user_meta.install_site"))
+    .withColumn("install_campaign", F.col("user_meta.install_campaign"))
+    .withColumn("install_adgroup", F.col("user_meta.install_adgroup"))
+    .withColumn("install_publisher", F.col("user_meta.install_publisher"))
+    .withColumn("install_site", F.col("user_meta.install_site"))
     .withColumn("is_paying", F.col("user_meta.is_paying"))
     .withColumn("origin", F.col("user_meta.origin"))
     .withColumn("pay_ft", F.col("user_meta.pay_ft"))
-    # .withColumn("site_id", F.col("user_meta.site_id"))
-    # .withColumn("attribution_partner", F.col("user_meta.attribution_partner"))
+    .withColumn("attribution_partner", F.col("user_meta.attribution_partner"))
     .withColumn("revenue", F.col("user_meta.revenue"))
-    .withColumn("cohort_month", F.from_unixtime(F.col("user_meta.cohort_month"), 'yyyy-MM'))
+    .withColumn("cohort_month", F.from_unixtime(F.col("user_meta.cohort_month"), "yyyy-MM"))
     .withColumn("is_converting", F.col("user_meta.is_converting"))
     .withColumn("cohort_week", F.from_unixtime(F.col("user_meta.cohort_week")))
     .withColumn("first_build", F.col("user_meta.first_build"))
@@ -548,7 +614,6 @@ def progression():
     .withColumn("configurations", F.col("data.configurations"))
     .withColumn("connection_type", F.col("data.connection_type"))
     .withColumn("engine_version", F.col("data.engine_version"))
-    # .withColumn("event_id", F.col("data.event_id"))
     .withColumn("google_aid", F.col("data.google_aid"))
     .withColumn("google_aid_src", F.col("data.google_aid_src"))
     .withColumn("ios_app_build", F.col("data.ios_app_build"))
@@ -568,7 +633,10 @@ def progression():
     .withColumn("progression_1", F.col("event_id_split").getItem(1))
     .withColumn("progression_2", F.col("event_id_split").getItem(2))
     .withColumn("progression_3", F.col("event_id_split").getItem(3))
-    .drop('file_path','file_modification_time','user_meta','data','event_id_split')
+    .withColumn("custom_01", F.col("data.custom_01"))
+    .withColumn("custom_02", F.col("data.custom_02"))
+    .withColumn("custom_03", F.col("data.custom_03"))
+    .drop("file_path","file_modification_time","user_meta","data","event_id_split")
   )
 
 # COMMAND ----------
@@ -578,21 +646,22 @@ def progression():
 
 # COMMAND ----------
 
-user_meta_schema = StructType([
-    # StructField("attribution_partner", StringType(), True),
+ads_user_meta_schema = StructType([
+    StructField("attribution_partner", StringType(), True),
     StructField("cohort_month", LongType(), True),
     StructField("cohort_week", LongType(), True),
     StructField("first_build", StringType(), True),
-    # StructField("install_campaign", StringType(), True),
+    StructField("install_campaign", StringType(), True),
     StructField("install_hour", LongType(), True),
+    StructField("install_adgroup", StringType(), True),
     StructField("install_publisher", StringType(), True),
-    # StructField("install_site", StringType(), True),
+    StructField("install_site", StringType(), True),
     StructField("install_ts", LongType(), True),
-    StructField("is_converting", StringType(), True),
-    StructField("is_paying", StringType(), True),
+    StructField("is_converting", BooleanType(), True),
+    StructField("is_paying", BooleanType(), True),
     StructField("origin", StringType(), True),
     StructField("pay_ft", LongType(), True),
-    StructField("revenue", StringType(), True),
+    StructField("revenue", DoubleType(), True)
 ])
 
 ads_data_schema = StructType([
@@ -637,7 +706,10 @@ ads_data_schema = StructType([
     StructField("session_num", LongType(), True),
     StructField("user_id", StringType(), True),
     StructField("user_id_ext", StringType(), True),
-    StructField("v", LongType(), True)
+    StructField("v", LongType(), True),
+    StructField("custom_01", StringType(), True),
+    StructField("custom_02", StringType(), True),
+    StructField("custom_03", StringType(), True),
 ])
 
 ads_schema = StructType([
@@ -646,16 +718,16 @@ ads_schema = StructType([
     StructField("first_in_batch", BooleanType(), True, {"comment": ""}),
     StructField("country_code", StringType(), True, {"comment": "Country code for the player's country based on events (please note this may change day on day if the player is travelling)"}),
     StructField("arrival_ts", TimestampType(), True, {"comment": "Timestamp for which the event arrived at GA (discrepancy might be for users being offline, for example)"}),
-    # StructField("install_campaign", StringType(), True, {"comment": ""}),
+    StructField("install_campaign", StringType(), True, {"comment": ""}),
     StructField("install_publisher", StringType(), True, {"comment": ""}),
-    # StructField("install_site", StringType(), True, {"comment": ""}),
-    StructField("is_paying", StringType(), True, {"comment": ""}),
+    StructField("install_site", StringType(), True, {"comment": ""}),
+    StructField("is_paying", BooleanType(), True, {"comment": ""}),
     StructField("origin", StringType(), True, {"comment": ""}),
     StructField("pay_ft", LongType(), True, {"comment": ""}),
-    # StructField("attribution_partner", StringType(), True, {"comment": ""}),
-    StructField("revenue", StringType(), True, {"comment": ""}),
+    StructField("attribution_partner", StringType(), True, {"comment": ""}),
+    StructField("revenue", DoubleType(), True, {"comment": ""}),
     StructField("cohort_month", StringType(), True, {"comment": "First day of the month the player installed the game	"}),
-    StructField("is_converting", StringType(), True, {"comment": "Flag indicating whether it's the first time the player is making a payment (since we have history of it)	"}),
+    StructField("is_converting", BooleanType(), True, {"comment": "Flag indicating whether it's the first time the player is making a payment (since we have history of it)	"}),
     StructField("cohort_week", StringType(), True, {"comment": "First day of the week the player installed the game	"}),
     StructField("first_build", StringType(), True, {"comment": ""}),
     StructField("install_ts", TimestampType(), True, {"comment": "Date the player installed the game"}),
@@ -702,6 +774,9 @@ ads_schema = StructType([
     StructField("ad_placement", StringType(), True, {"comment": "end_of_game, after_level,[any string] Max 64 characters"}),
     StructField("ad_sdk_name", StringType(), True, {"comment": "admob, fyber, applovin, ironsource,[any string] Lowercase with no spaces or underscores"}),
     StructField("ad_type", StringType(), True, {"comment": "video | rewarded_video | playable | interstitial | offer_wall | banner"}),
+    StructField("custom_01", StringType(), True, {"comment": "Custom field 1"}),
+    StructField("custom_02", StringType(), True, {"comment": "Custom field 2"}),
+    StructField("custom_03", StringType(), True, {"comment": "Custom field 3"}),
 ])
 
 ads_comment = """
@@ -715,21 +790,23 @@ Refer to GameAnalytics [documentation](https://docs.gameanalytics.com/event-type
   comment=ads_comment,
   schema=ads_schema
   )
+@dlt.expect("valid_ad_type", "ad_type IN ('video', 'rewarded_video', 'playable', 'interstitial', 'offer_wall', 'banner')")
+@dlt.expect("valid_ad_action", "ad_action IN ('clicked', 'show', 'failed_show', 'reward_received')")
 def ads():
   return (
     dlt.read("events")
-    .filter(F.col("data").contains('"category":"ads"'))
-    .withColumn("user_meta", F.from_json("user_meta", user_meta_schema))
+    .filter(F.col("data").contains('category":"ads"'))
+    .withColumn("user_meta", F.from_json("user_meta", ads_user_meta_schema))
     .withColumn("data", F.from_json("data", ads_data_schema))
     .withColumn("arrival_ts", F.to_timestamp(F.from_unixtime(F.col("arrival_ts"))))
-    # .withColumn("install_campaign", F.col("user_meta.install_campaign"))
-    # .withColumn("install_site", F.col("user_meta.install_site"))
+    .withColumn("install_campaign", F.col("user_meta.install_campaign"))
+    .withColumn("install_site", F.col("user_meta.install_site"))
     .withColumn("is_paying", F.col("user_meta.is_paying"))
     .withColumn("origin", F.col("user_meta.origin"))
     .withColumn("pay_ft", F.col("user_meta.pay_ft"))
-    # .withColumn("attribution_partner", F.col("user_meta.attribution_partner"))
+    .withColumn("attribution_partner", F.col("user_meta.attribution_partner"))
     .withColumn("revenue", F.col("user_meta.revenue"))
-    .withColumn("cohort_month", F.from_unixtime(F.col("user_meta.cohort_month"), 'yyyy-MM'))
+    .withColumn("cohort_month", F.from_unixtime(F.col("user_meta.cohort_month"), "yyyy-MM"))
     .withColumn("is_converting", F.col("user_meta.is_converting"))
     .withColumn("cohort_week", F.from_unixtime(F.col("user_meta.cohort_week")))
     .withColumn("first_build", F.col("user_meta.first_build"))
@@ -777,7 +854,10 @@ def ads():
     .withColumn("ad_placement", F.col("data.ad_placement"))
     .withColumn("ad_sdk_name", F.col("data.ad_sdk_name"))
     .withColumn("ad_type", F.col("data.ad_type"))
-    .drop('file_path','file_modification_time','user_meta','data')
+    .withColumn("custom_01", F.col("data.custom_01"))
+    .withColumn("custom_02", F.col("data.custom_02"))
+    .withColumn("custom_03", F.col("data.custom_03"))
+    .drop("file_path","file_modification_time","user_meta","data")
   )
 
 # COMMAND ----------
@@ -787,21 +867,28 @@ def ads():
 
 # COMMAND ----------
 
-user_meta_schema = StructType([
-    StructField("revenue", StringType(), True),
-    StructField("pay_ft", LongType(), True),
-    StructField("origin", StringType(), True),
-    StructField("is_converting", StringType(), True),
-    StructField("is_paying", StringType(), True),
-    StructField("install_ts", LongType(), True),
-    StructField("install_hour", LongType(), True),
-    StructField("first_build", StringType(), True),
+resource_user_meta_schema = StructType([
+    StructField("attribution_partner", StringType(), True),
+    StructField("cohort_month", LongType(), True),
     StructField("cohort_week", LongType(), True),
-    StructField("cohort_month", LongType(), True)
+    StructField("first_build", StringType(), True),
+    StructField("install_campaign", StringType(), True),
+    StructField("install_hour", LongType(), True),
+    StructField("install_adgroup", StringType(), True),
+    StructField("install_publisher", StringType(), True),
+    StructField("install_site", StringType(), True),
+    StructField("install_ts", LongType(), True),
+    StructField("is_converting", BooleanType(), True),
+    StructField("is_paying", BooleanType(), True),
+    StructField("origin", StringType(), True),
+    StructField("pay_ft", LongType(), True),
+    StructField("revenue", DoubleType(), True)
 ])
 
 resource_data_schema = StructType([
     StructField("amount", LongType(), True),
+    StructField("ab_id", StringType(), True),
+    StructField("ab_variant_id", StringType(), True),
     StructField("build", StringType(), True),
     StructField("category", StringType(), True),
     StructField("client_ts", LongType(), True),
@@ -812,14 +899,7 @@ resource_data_schema = StructType([
     StructField("device", StringType(), True),
     StructField("engine_version", StringType(), True),
     StructField("event_id", StringType(), True),
-    StructField("ios_app_build", StringType(), True),
-    StructField("ios_app_version", StringType(), True),
-    StructField("ios_att", StringType(), True),
-    StructField("ios_bundle_id", StringType(), True),
-    StructField("ios_idfa", StringType(), True),
-    StructField("ios_idfv", StringType(), True),
-    StructField("jailbroken", BooleanType(), True),
-    StructField("limited_ad_tracking", BooleanType(), True),
+    StructField("google_aid", StringType(), True),
     StructField("manufacturer", StringType(), True),
     StructField("os_version", StringType(), True),
     StructField("platform", StringType(), True),
@@ -828,7 +908,10 @@ resource_data_schema = StructType([
     StructField("session_num", LongType(), True),
     StructField("user_id", StringType(), True),
     StructField("user_id_ext", StringType(), True),
-    StructField("v", LongType(), True)
+    StructField("v", LongType(), True),
+    StructField("custom_01", StringType(), True),
+    StructField("custom_02", StringType(), True),
+    StructField("custom_03", StringType(), True),
 ])
 
 resource_schema = StructType([
@@ -837,12 +920,18 @@ resource_schema = StructType([
     StructField("first_in_batch", BooleanType(), True, {"comment": ""}),
     StructField("country_code", StringType(), True, {"comment": "Country code for the player's country based on events (please note this may change day on day if the player is travelling)"}),
     StructField("arrival_ts", TimestampType(), True, {"comment": "Timestamp for which the event arrived at GA (discrepancy might be for users being offline, for example)"}),
-    StructField("is_paying", StringType(), True, {"comment": ""}),
+    StructField("install_campaign", StringType(), True, {"comment": ""}),
+    StructField("install_adgroup", StringType(), True, {"comment": ""}),
+    StructField("install_publisher", StringType(), True, {"comment": ""}),
+    StructField("install_site", StringType(), True, {"comment": ""}),
+    StructField("is_paying", BooleanType(), True, {"comment": ""}),
     StructField("origin", StringType(), True, {"comment": ""}),
     StructField("pay_ft", LongType(), True, {"comment": ""}),
-    StructField("revenue", StringType(), True, {"comment": ""}),
+    StructField("site_id", StringType(), True, {"comment": ""}),
+    StructField("attribution_partner", StringType(), True, {"comment": ""}),
+    StructField("revenue", DoubleType(), True, {"comment": ""}),
     StructField("cohort_month", StringType(), True, {"comment": "First day of the month the player installed the game	"}),
-    StructField("is_converting", StringType(), True, {"comment": "Flag indicating whether it's the first time the player is making a payment (since we have history of it)	"}),
+    StructField("is_converting", BooleanType(), True, {"comment": "Flag indicating whether it's the first time the player is making a payment (since we have history of it)	"}),
     StructField("cohort_week", StringType(), True, {"comment": "First day of the week the player installed the game	"}),
     StructField("first_build", StringType(), True, {"comment": ""}),
     StructField("install_ts", TimestampType(), True, {"comment": "Date the player installed the game"}),
@@ -859,33 +948,24 @@ resource_schema = StructType([
     StructField("manufacturer", StringType(), True, {"comment": "Device's manufacturer"}),
     StructField("platform", StringType(), True, {"comment": "Platform e.g. ios, android	"}),
     StructField("device", StringType(), True, {"comment": "Device model"}),
-    # StructField("ab_id", StringType(), True, {"comment": "A/B Testing experiment identifier in case the player is participating in an A/B Test"}),
-    # StructField("ab_variant_id", StringType(), True, {"comment": "A/B Testing variant identifier in case the player is participating in an A/B Test"}),
-    # StructField("android_app_build", StringType(), True, {"comment": ""}),
-    # StructField("android_app_signature", StringType(), True, {"comment": ""}),
-    # StructField("android_app_version", StringType(), True, {"comment": ""}),
-    # StructField("android_bundle_id", StringType(), True, {"comment": ""}),
-    # StructField("android_channel_id", StringType(), True, {"comment": ""}),
-    # StructField("android_id", StringType(), True, {"comment": "Android id	"}), #find a better defintion
-    # StructField("android_mac_md5", StringType(), True, {"comment": ""}),
-    # StructField("android_mac_sha1", StringType(), True, {"comment": ""}),
+    StructField("amount", LongType(), True, {"comment": ""}),
+    StructField("ab_id", StringType(), True, {"comment": "A/B Testing experiment identifier in case the player is participating in an A/B Test"}),
+    StructField("ab_variant_id", StringType(), True, {"comment": "A/B Testing variant identifier in case the player is participating in an A/B Test"}),
     StructField("configuration_keys", ArrayType(StringType()), True, {"comment": ""}),
     StructField("configurations", ArrayType(StringType()), True, {"comment": ""}),
     StructField("connection_type", StringType(), True, {"comment": "connection, e.g. lan, wwan, wifi, offline	"}),
     StructField("engine_version", StringType(), True, {"comment": "engine version"}),
-    # StructField("google_aid", StringType(), True, {"comment": "Android advertising id	"}),
-    # StructField("google_aid_src", StringType(), True, {"comment": ""}),
-    StructField("ios_app_build", StringType(), True, {"comment": ""}),
-    StructField("ios_app_version", StringType(), True, {"comment": ""}),
-    StructField("ios_att", StringType(), True, {"comment": ""}),
-    StructField("ios_bundle_id", StringType(), True, {"comment": ""}),
-    StructField("ios_idfa", StringType(), True, {"comment": "IOS identifier for advertisers"}),
-    StructField("ios_idfv", StringType(), True, {"comment": "IOS identifier for vendor"}),
-    # StructField("ios_testflight", BooleanType(), True, {"comment": ""}),
-    StructField("jailbroken", BooleanType(), True, {"comment": "whether the player has jailbreaking (process of removing all restrictions imposed on an IOS device) enabled"}),
+    StructField("google_aid", StringType(), True, {"comment": "Android advertising id	"}),
     StructField("limited_ad_tracking", BooleanType(), True, {"comment": "if True, it means the player does not want to be targeted, preventing attribution of installs to any advertising source"}),
     StructField("user_id_ext", StringType(), True, {"comment": ""}),
-    StructField("event_id", StringType(), True, {"comment": ""}),
+    StructField("custom_01", StringType(), True, {"comment": "Custom field 1"}),
+    StructField("custom_02", StringType(), True, {"comment": "Custom field 2"}),
+    StructField("custom_03", StringType(), True, {"comment": "Custom field 3"}),
+    StructField("event_id", StringType(), True, {"comment": "A 4 part event id string. [flowType]:[virtualCurrency]:[itemType]:[itemId]"}),
+    StructField("flow_type", StringType(), True, {"comment": "Flow type is an enum with only 2 possible string values. Sink means spending virtual currency on something. Source means receiving virtual currency from some action."}),
+    StructField("virtual_currency", StringType(), True, {"comment": ""}),
+    StructField("item_type", StringType(), True, {"comment": ""}),
+    StructField("item_id", StringType(), True, {"comment": ""}),
     StructField("element", StringType(), True, {"comment": ""}),
 ])
 
@@ -900,64 +980,58 @@ Refer to GameAnalytics [documentation](https://docs.gameanalytics.com/event-type
   comment=resource_comment,
   schema=resource_schema
   )
+@dlt.expect("valid_flow_type", "flow_type IN ('Sink', 'Source')")
 def resource():
   return (
     dlt.read("events")
     .filter(F.col("data").contains('"category":"resource"'))
-    .withColumn("user_meta", F.from_json("user_meta", user_meta_schema))
+    .withColumn("user_meta", F.from_json("user_meta", resource_user_meta_schema))
     .withColumn("data", F.from_json("data", resource_data_schema))
     .withColumn("arrival_ts", F.to_timestamp(F.from_unixtime(F.col("arrival_ts"))))
+    .withColumn("install_campaign", F.col("user_meta.install_campaign"))
+    .withColumn("install_site", F.col("user_meta.install_site"))
     .withColumn("is_paying", F.col("user_meta.is_paying"))
     .withColumn("origin", F.col("user_meta.origin"))
     .withColumn("pay_ft", F.col("user_meta.pay_ft"))
+    .withColumn("attribution_partner", F.col("user_meta.attribution_partner"))
     .withColumn("revenue", F.col("user_meta.revenue"))
-    .withColumn("cohort_month", F.from_unixtime(F.col("user_meta.cohort_month"), 'yyyy-MM'))
+    .withColumn("cohort_month", F.from_unixtime(F.col("user_meta.cohort_month"), "yyyy-MM"))
     .withColumn("is_converting", F.col("user_meta.is_converting"))
     .withColumn("cohort_week", F.from_unixtime(F.col("user_meta.cohort_week")))
     .withColumn("first_build", F.col("user_meta.first_build"))
     .withColumn("install_ts", F.to_timestamp(F.from_unixtime(F.col("user_meta.install_ts"))))
     .withColumn("install_hour", F.to_timestamp(F.from_unixtime(F.col("user_meta.install_hour"))))
-    .withColumn("session_id", F.col("data.session_id"))
-    .withColumn("os_version", F.col("data.os_version"))
-    .withColumn("client_ts", F.to_timestamp(F.from_unixtime(F.col("data.client_ts"))))
-    .withColumn("session_num", F.col("data.session_num"))
+    .withColumn("amount", F.col("data.amount"))
+    .withColumn("ab_id", F.col("data.ab_id"))
+    .withColumn("ab_variant_id", F.col("data.ab_variant_id"))
     .withColumn("build", F.col("data.build"))
-    .withColumn("user_id", F.col("data.user_id"))
-    .withColumn("v", F.col("data.v"))
     .withColumn("category", F.col("data.category"))
-    .withColumn("sdk_version", F.col("data.sdk_version"))
-    .withColumn("manufacturer", F.col("data.manufacturer"))
-    .withColumn("platform", F.col("data.platform"))
-    .withColumn("device", F.col("data.device"))
-    # .withColumn("ab_id", F.col("data.ab_id"))
-    # .withColumn("ab_variant_id", F.col("data.ab_variant_id"))
-    # .withColumn("android_app_build", F.col("data.android_app_build"))
-    # .withColumn("android_app_signature", F.col("data.android_app_signature"))
-    # .withColumn("android_app_version", F.col("data.android_app_version"))
-    # .withColumn("android_bundle_id", F.col("data.android_bundle_id"))
-    # .withColumn("android_channel_id", F.col("data.android_channel_id"))
-    # .withColumn("android_id", F.col("data.android_id"))
-    # .withColumn("android_mac_md5", F.col("data.android_mac_md5"))
-    # .withColumn("android_mac_sha1", F.col("data.android_mac_sha1"))
     .withColumn("configuration_keys", F.col("data.configuration_keys"))
     .withColumn("configurations", F.col("data.configurations"))
     .withColumn("connection_type", F.col("data.connection_type"))
+    .withColumn("custom_01", F.col("data.custom_01"))
+    .withColumn("custom_02", F.col("data.custom_02"))
+    .withColumn("custom_03", F.col("data.custom_03"))
+    .withColumn("device", F.col("data.device"))
     .withColumn("engine_version", F.col("data.engine_version"))
-    # .withColumn("google_aid", F.col("data.google_aid"))
-    # .withColumn("google_aid_src", F.col("data.google_aid_src"))
-    .withColumn("ios_app_build", F.col("data.ios_app_build"))
-    .withColumn("ios_app_version", F.col("data.ios_app_version"))
-    .withColumn("ios_att", F.col("data.ios_att"))
-    .withColumn("ios_bundle_id", F.col("data.ios_bundle_id"))
-    .withColumn("ios_idfa", F.col("data.ios_idfa"))
-    .withColumn("ios_idfv", F.col("data.ios_idfv"))
-    # .withColumn("ios_testflight", F.col("data.ios_testflight"))
-    .withColumn("jailbroken", F.col("data.jailbroken"))
-    .withColumn("limited_ad_tracking", F.col("data.limited_ad_tracking"))
-    .withColumn("user_id_ext", F.col("data.user_id_ext"))
     .withColumn("event_id", F.col("data.event_id"))
+    .withColumn("google_aid", F.col("data.google_aid"))
+    .withColumn("manufacturer", F.col("data.manufacturer"))
+    .withColumn("os_version", F.col("data.os_version"))
+    .withColumn("platform", F.col("data.platform"))
+    .withColumn("sdk_version", F.col("data.sdk_version"))
+    .withColumn("session_id", F.col("data.session_id"))
+    .withColumn("session_num", F.col("data.session_num"))
+    .withColumn("user_id", F.col("data.user_id"))
+    .withColumn("user_id_ext", F.col("data.user_id_ext"))
+    .withColumn("v", F.col("data.v"))
+    .withColumn("event_id_split",F.split(F.col("data.event_id"), ":"))
+    .withColumn("flow_type", F.col("event_id_split").getItem(0))
+    .withColumn("virtual_currency", F.col("event_id_split").getItem(1))
+    .withColumn("item_type", F.col("event_id_split").getItem(2))
+    .withColumn("item_id", F.col("event_id_split").getItem(3))
     .withColumn("element", F.col("data.element"))
-    .drop('file_path','file_modification_time','user_meta','data')
+    .drop("file_path","file_modification_time","user_meta","data","event_id_split")
   )
 
 # COMMAND ----------
@@ -967,21 +1041,22 @@ def resource():
 
 # COMMAND ----------
 
-user_meta_schema = StructType([
-  StructField("attribution_partner", StringType(), True),
-  StructField("cohort_month", LongType(), True),
-  StructField("cohort_week", LongType(), True),
-  StructField("first_build", StringType(), True),
-  StructField("install_campaign", StringType(), True),
-  StructField("install_hour", LongType(), True),
-  StructField("install_publisher", StringType(), True),
-  StructField("install_site", StringType(), True),
-  StructField("install_ts", LongType(), True),
-  StructField("is_converting", StringType(), True),
-  StructField("is_paying", StringType(), True),
-  StructField("origin", StringType(), True),
-  StructField("pay_ft", LongType(), True),
-  StructField("revenue", StringType(), True)
+impression_user_meta_schema = StructType([
+    StructField("attribution_partner", StringType(), True),
+    StructField("cohort_month", LongType(), True),
+    StructField("cohort_week", LongType(), True),
+    StructField("first_build", StringType(), True),
+    StructField("install_campaign", StringType(), True),
+    StructField("install_hour", LongType(), True),
+    StructField("install_adgroup", StringType(), True),
+    StructField("install_publisher", StringType(), True),
+    StructField("install_site", StringType(), True),
+    StructField("install_ts", LongType(), True),
+    StructField("is_converting", BooleanType(), True),
+    StructField("is_paying", BooleanType(), True),
+    StructField("origin", StringType(), True),
+    StructField("pay_ft", LongType(), True),
+    StructField("revenue", DoubleType(), True)
 ])
 
 impression_data_schema = StructType([
@@ -1049,7 +1124,10 @@ impression_data_schema = StructType([
     StructField("session_num", LongType(), True),
     StructField("user_id", StringType(), True),
     StructField("user_id_ext", StringType(), True),
-    StructField("v", LongType(), True)
+    StructField("v", LongType(), True),
+    StructField("custom_01", StringType(), True),
+    StructField("custom_02", StringType(), True),
+    StructField("custom_03", StringType(), True),
 ])
 
 impression_schema = StructType([
@@ -1059,15 +1137,18 @@ impression_schema = StructType([
     StructField("country_code", StringType(), True, {"comment": "Country code for the player's country based on events (please note this may change day on day if the player is travelling)"}),
     StructField("arrival_ts", TimestampType(), True, {"comment": "Timestamp for which the event arrived at GA (discrepancy might be for users being offline, for example)"}),
     StructField("install_campaign", StringType(), True, {"comment": ""}),
+    StructField("install_adgroup", StringType(), True, {"comment": ""}),
+    StructField("install_publisher", StringType(), True, {"comment": ""}),
     StructField("install_site", StringType(), True, {"comment": ""}),
-    StructField("is_paying", StringType(), True, {"comment": ""}),
+    StructField("is_paying", BooleanType(), True, {"comment": ""}),
     StructField("origin", StringType(), True, {"comment": ""}),
     StructField("pay_ft", LongType(), True, {"comment": ""}),
-    StructField("revenue", StringType(), True, {"comment": ""}),
-    StructField("cohort_month", StringType(), True, {"comment": "First day of the month the player installed the game	"}),
-    StructField("is_converting", StringType(), True, {"comment": "Flag indicating whether it's the first time the player is making a payment (since we have history of it)	"}),
-    StructField("cohort_week", StringType(), True, {"comment": "First day of the week the player installed the game	"}),
+    StructField("site_id", StringType(), True, {"comment": ""}),
     StructField("attribution_partner", StringType(), True, {"comment": ""}),
+    StructField("revenue", DoubleType(), True, {"comment": ""}),
+    StructField("cohort_month", StringType(), True, {"comment": "First day of the month the player installed the game	"}),
+    StructField("is_converting", BooleanType(), True, {"comment": "Flag indicating whether it's the first time the player is making a payment (since we have history of it)	"}),
+    StructField("cohort_week", StringType(), True, {"comment": "First day of the week the player installed the game	"}),
     StructField("first_build", StringType(), True, {"comment": ""}),
     StructField("install_ts", TimestampType(), True, {"comment": "Date the player installed the game"}),
     StructField("install_hour", TimestampType(), True, {"comment": ""}),
@@ -1083,26 +1164,25 @@ impression_schema = StructType([
     StructField("manufacturer", StringType(), True, {"comment": "Device's manufacturer"}),
     StructField("platform", StringType(), True, {"comment": "Platform e.g. ios, android	"}),
     StructField("device", StringType(), True, {"comment": "Device model"}),
-    # StructField("ab_id", StringType(), True, {"comment": "A/B Testing experiment identifier in case the player is participating in an A/B Test"}),
-    # StructField("ab_variant_id", StringType(), True, {"comment": "A/B Testing variant identifier in case the player is participating in an A/B Test"}),
+    StructField("ab_id", StringType(), True, {"comment": "A/B Testing experiment identifier in case the player is participating in an A/B Test"}),
+    StructField("ab_variant_id", StringType(), True, {"comment": "A/B Testing variant identifier in case the player is participating in an A/B Test"}),
     StructField("ad_network_name", StringType(), True, {"comment": ""}),
     StructField("ad_network_version", StringType(), True, {"comment": ""}),
-    # StructField("android_app_build", StringType(), True, {"comment": ""}),
-    # StructField("android_app_signature", StringType(), True, {"comment": ""}),
-    # StructField("android_app_version", StringType(), True, {"comment": ""}),
-    # StructField("android_bundle_id", StringType(), True, {"comment": ""}),
-    # StructField("android_channel_id", StringType(), True, {"comment": ""}),
-    # StructField("android_id", StringType(), True, {"comment": "Android id	"}), #find a better defintion
-    # StructField("android_mac_md5", StringType(), True, {"comment": ""}),
-    # StructField("android_mac_sha1", StringType(), True, {"comment": ""}),
+    StructField("android_app_build", StringType(), True, {"comment": ""}),
+    StructField("android_app_signature", StringType(), True, {"comment": ""}),
+    StructField("android_app_version", StringType(), True, {"comment": ""}),
+    StructField("android_bundle_id", StringType(), True, {"comment": ""}),
+    StructField("android_channel_id", StringType(), True, {"comment": ""}),
+    StructField("android_id", StringType(), True, {"comment": "Android id	"}), #find a better defintion
+    StructField("android_mac_md5", StringType(), True, {"comment": ""}),
+    StructField("android_mac_sha1", StringType(), True, {"comment": ""}),
     StructField("configuration_keys", ArrayType(StringType()), True, {"comment": ""}),
     StructField("configurations", ArrayType(StringType()), True, {"comment": ""}),
     StructField("element", StringType(), True, {"comment": ""}),
-    StructField("android_mac_sha1", StringType(), True, {"comment": ""}),
     StructField("connection_type", StringType(), True, {"comment": "connection, e.g. lan, wwan, wifi, offline	"}),
     StructField("engine_version", StringType(), True, {"comment": "engine version"}),
     StructField("google_aid", StringType(), True, {"comment": "Android advertising id	"}),
-    # StructField("google_aid_src", StringType(), True, {"comment": ""}),
+    StructField("google_aid_src", StringType(), True, {"comment": ""}),
     StructField("adgroup_id", StringType(), True, {"comment": ""}),
     StructField("adgroup_name", StringType(), True, {"comment": ""}),
     StructField("adgroup_priority", LongType(), True, {"comment": ""}),
@@ -1131,8 +1211,11 @@ impression_schema = StructType([
     StructField("ios_idfv", StringType(), True, {"comment": "IOS identifier for vendor"}),
     StructField("jailbroken", BooleanType(), True, {"comment": "whether the player has jailbreaking (process of removing all restrictions imposed on an IOS device) enabled"}),
     StructField("limited_ad_tracking", BooleanType(), True, {"comment": "if True, it means the player does not want to be targeted, preventing attribution of installs to any advertising source"}),
-    # StructField("oaid", StringType(), True, {"comment": ""}),
+    StructField("oaid", StringType(), True, {"comment": ""}),
     StructField("user_id_ext", StringType(), True, {"comment": ""}),
+    StructField("custom_01", StringType(), True, {"comment": "Custom field 1"}),
+    StructField("custom_02", StringType(), True, {"comment": "Custom field 2"}),
+    StructField("custom_03", StringType(), True, {"comment": "Custom field 3"}),
 
 ])
 
@@ -1151,7 +1234,7 @@ def impression():
   return (
     dlt.read("events")
     .filter(F.col("data").contains('"category":"impression"'))
-    .withColumn("user_meta", F.from_json("user_meta", user_meta_schema))
+    .withColumn("user_meta", F.from_json("user_meta", impression_user_meta_schema))
     .withColumn("data", F.from_json("data", impression_data_schema))
     .withColumn("arrival_ts", F.to_timestamp(F.from_unixtime(F.col("arrival_ts"))))
     .withColumn("install_campaign", F.col("user_meta.install_campaign"))
@@ -1161,7 +1244,7 @@ def impression():
     .withColumn("pay_ft", F.col("user_meta.pay_ft"))
     .withColumn("attribution_partner", F.col("user_meta.attribution_partner"))
     .withColumn("revenue", F.col("user_meta.revenue"))
-    .withColumn("cohort_month", F.from_unixtime(F.col("user_meta.cohort_month"), 'yyyy-MM'))
+    .withColumn("cohort_month", F.from_unixtime(F.col("user_meta.cohort_month"), "yyyy-MM"))
     .withColumn("is_converting", F.col("user_meta.is_converting"))
     .withColumn("cohort_week", F.from_unixtime(F.col("user_meta.cohort_week")))
     .withColumn("first_build", F.col("user_meta.first_build"))
@@ -1179,22 +1262,22 @@ def impression():
     .withColumn("manufacturer", F.col("data.manufacturer"))
     .withColumn("platform", F.col("data.platform"))
     .withColumn("device", F.col("data.device"))
-    # .withColumn("ab_id", F.col("data.ab_id"))
-    # .withColumn("ab_variant_id", F.col("data.ab_variant_id"))
-    # .withColumn("android_app_build", F.col("data.android_app_build"))
-    # .withColumn("android_app_signature", F.col("data.android_app_signature"))
-    # .withColumn("android_app_version", F.col("data.android_app_version"))
-    # .withColumn("android_bundle_id", F.col("data.android_bundle_id"))
-    # .withColumn("android_channel_id", F.col("data.android_channel_id"))
-    # .withColumn("android_id", F.col("data.android_id"))
-    # .withColumn("android_mac_md5", F.col("data.android_mac_md5"))
-    # .withColumn("android_mac_sha1", F.col("data.android_mac_sha1"))
+    .withColumn("ab_id", F.col("data.ab_id"))
+    .withColumn("ab_variant_id", F.col("data.ab_variant_id"))
+    .withColumn("android_app_build", F.col("data.android_app_build"))
+    .withColumn("android_app_signature", F.col("data.android_app_signature"))
+    .withColumn("android_app_version", F.col("data.android_app_version"))
+    .withColumn("android_bundle_id", F.col("data.android_bundle_id"))
+    .withColumn("android_channel_id", F.col("data.android_channel_id"))
+    .withColumn("android_id", F.col("data.android_id"))
+    .withColumn("android_mac_md5", F.col("data.android_mac_md5"))
+    .withColumn("android_mac_sha1", F.col("data.android_mac_sha1"))
     .withColumn("configuration_keys", F.col("data.configuration_keys"))
     .withColumn("configurations", F.col("data.configurations"))
     .withColumn("connection_type", F.col("data.connection_type"))
     .withColumn("engine_version", F.col("data.engine_version"))
     .withColumn("google_aid", F.col("data.google_aid"))
-    # .withColumn("google_aid_src", F.col("data.google_aid_src"))
+    .withColumn("google_aid_src", F.col("data.google_aid_src"))
     .withColumn("ios_app_build", F.col("data.ios_app_build"))
     .withColumn("ios_app_version", F.col("data.ios_app_version"))
     .withColumn("ios_att", F.col("data.ios_att"))
@@ -1203,7 +1286,7 @@ def impression():
     .withColumn("ios_idfv", F.col("data.ios_idfv"))
     .withColumn("jailbroken", F.col("data.jailbroken"))
     .withColumn("limited_ad_tracking", F.col("data.limited_ad_tracking"))
-    # .withColumn("oaid", F.col("data.oaid"))
+    .withColumn("oaid", F.col("data.oaid"))
     .withColumn("user_id_ext", F.col("data.user_id_ext"))
     .withColumn("ad_network_name", F.col("data.ad_network_name"))
     .withColumn("ad_network_version", F.col("data.ad_network_version"))
@@ -1228,7 +1311,10 @@ def impression():
     .withColumn("publisher_revenue", F.col("data.impression_data.publisher_revenue"))
     .withColumn("publisher_revenue_usd_cents", F.col("data.impression_data.publisher_revenue_usd_cents"))
     .withColumn("impression_revenue", F.col("data.impression_data.revenue"))
-    .drop('file_path','file_modification_time','user_meta','data')
+    .withColumn("custom_01", F.col("data.custom_01"))
+    .withColumn("custom_02", F.col("data.custom_02"))
+    .withColumn("custom_03", F.col("data.custom_03"))
+    .drop("file_path","file_modification_time","user_meta","data")
   )
 
 # COMMAND ----------
@@ -1238,21 +1324,22 @@ def impression():
 
 # COMMAND ----------
 
-user_meta_schema = StructType([
-  StructField("attribution_partner", StringType(), True),
-  StructField("cohort_month", LongType(), True),
-  StructField("cohort_week", LongType(), True),
-  StructField("first_build", StringType(), True),
-  StructField("install_campaign", StringType(), True),
-  StructField("install_hour", LongType(), True),
-  StructField("install_publisher", StringType(), True),
-  StructField("install_site", StringType(), True),
-  StructField("install_ts", LongType(), True),
-  StructField("is_converting", StringType(), True),
-  StructField("is_paying", StringType(), True),
-  StructField("origin", StringType(), True),
-  StructField("pay_ft", LongType(), True),
-  StructField("revenue", StringType(), True)
+error_user_meta_schema = StructType([
+    StructField("attribution_partner", StringType(), True),
+    StructField("cohort_month", LongType(), True),
+    StructField("cohort_week", LongType(), True),
+    StructField("first_build", StringType(), True),
+    StructField("install_campaign", StringType(), True),
+    StructField("install_hour", LongType(), True),
+    StructField("install_adgroup", StringType(), True),
+    StructField("install_publisher", StringType(), True),
+    StructField("install_site", StringType(), True),
+    StructField("install_ts", LongType(), True),
+    StructField("is_converting", BooleanType(), True),
+    StructField("is_paying", BooleanType(), True),
+    StructField("origin", StringType(), True),
+    StructField("pay_ft", LongType(), True),
+    StructField("revenue", DoubleType(), True)
 ])
 
 error_data_schema = StructType([
@@ -1298,7 +1385,10 @@ error_data_schema = StructType([
     StructField("severity", StringType(), True),
     StructField("user_id", StringType(), True),
     StructField("user_id_ext", StringType(), True),
-    StructField("v", LongType(), True)
+    StructField("v", LongType(), True),
+    StructField("custom_01", StringType(), True),
+    StructField("custom_02", StringType(), True),
+    StructField("custom_03", StringType(), True),
 ])
 
 error_schema = StructType([
@@ -1307,19 +1397,22 @@ error_schema = StructType([
     StructField("first_in_batch", BooleanType(), True, {"comment": ""}),
     StructField("country_code", StringType(), True, {"comment": "Country code for the player's country based on events (please note this may change day on day if the player is travelling)"}),
     StructField("arrival_ts", TimestampType(), True, {"comment": "Timestamp for which the event arrived at GA (discrepancy might be for users being offline, for example)"}),
-    StructField("is_paying", StringType(), True, {"comment": ""}),
+    StructField("install_campaign", StringType(), True, {"comment": ""}),
+    StructField("install_adgroup", StringType(), True, {"comment": ""}),
+    StructField("install_publisher", StringType(), True, {"comment": ""}),
+    StructField("install_site", StringType(), True, {"comment": ""}),
+    StructField("is_paying", BooleanType(), True, {"comment": ""}),
     StructField("origin", StringType(), True, {"comment": ""}),
     StructField("pay_ft", LongType(), True, {"comment": ""}),
-    StructField("revenue", StringType(), True, {"comment": ""}),
-    StructField("cohort_month", StringType(), True, {"comment": "First day of the month the player installed the game	"}),
-    StructField("is_converting", StringType(), True, {"comment": "Flag indicating whether it's the first time the player is making a payment (since we have history of it)	"}),
-    StructField("cohort_week", StringType(), True, {"comment": "First day of the week the player installed the game	"}),
+    StructField("site_id", StringType(), True, {"comment": ""}),
     StructField("attribution_partner", StringType(), True, {"comment": ""}),
+    StructField("revenue", DoubleType(), True, {"comment": ""}),
+    StructField("cohort_month", StringType(), True, {"comment": "First day of the month the player installed the game	"}),
+    StructField("is_converting", BooleanType(), True, {"comment": "Flag indicating whether it's the first time the player is making a payment (since we have history of it)	"}),
+    StructField("cohort_week", StringType(), True, {"comment": "First day of the week the player installed the game	"}),
     StructField("first_build", StringType(), True, {"comment": ""}),
     StructField("install_ts", TimestampType(), True, {"comment": "Date the player installed the game"}),
     StructField("install_hour", TimestampType(), True, {"comment": ""}),
-    StructField("install_campaign", StringType(), True, {"comment": ""}),
-    StructField("install_site", StringType(), True, {"comment": ""}),
     StructField("session_id", StringType(), True, {"comment": "Session's unique identifier"}),
     StructField("os_version", StringType(), True, {"comment": "Device's OS version"}),
     StructField("client_ts", TimestampType(), True, {"comment": "Timestamp for which the event occurred"}),
@@ -1332,24 +1425,23 @@ error_schema = StructType([
     StructField("manufacturer", StringType(), True, {"comment": "Device's manufacturer"}),
     StructField("platform", StringType(), True, {"comment": "Platform e.g. ios, android	"}),
     StructField("device", StringType(), True, {"comment": "Device model"}),
-    # StructField("ab_id", StringType(), True, {"comment": "A/B Testing experiment identifier in case the player is participating in an A/B Test"}),
-    # StructField("ab_variant_id", StringType(), True, {"comment": "A/B Testing variant identifier in case the player is participating in an A/B Test"}),
-    # StructField("android_app_build", StringType(), True, {"comment": ""}),
-    # StructField("android_app_signature", StringType(), True, {"comment": ""}),
-    # StructField("android_app_version", StringType(), True, {"comment": ""}),
-    # StructField("android_bundle_id", StringType(), True, {"comment": ""}),
-    # StructField("android_channel_id", StringType(), True, {"comment": ""}),
-    # StructField("android_id", StringType(), True, {"comment": "Android id	"}), #find a better defintion
-    # StructField("android_mac_md5", StringType(), True, {"comment": ""}),
-    # StructField("android_mac_sha1", StringType(), True, {"comment": ""}),
+    StructField("ab_id", StringType(), True, {"comment": "A/B Testing experiment identifier in case the player is participating in an A/B Test"}),
+    StructField("ab_variant_id", StringType(), True, {"comment": "A/B Testing variant identifier in case the player is participating in an A/B Test"}),
+    StructField("android_app_build", StringType(), True, {"comment": ""}),
+    StructField("android_app_signature", StringType(), True, {"comment": ""}),
+    StructField("android_app_version", StringType(), True, {"comment": ""}),
+    StructField("android_bundle_id", StringType(), True, {"comment": ""}),
+    StructField("android_channel_id", StringType(), True, {"comment": ""}),
+    StructField("android_id", StringType(), True, {"comment": "Android id	"}), #find a better defintion
+    StructField("android_mac_md5", StringType(), True, {"comment": ""}),
+    StructField("android_mac_sha1", StringType(), True, {"comment": ""}),
     StructField("configuration_keys", ArrayType(StringType()), True, {"comment": ""}),
     StructField("configurations", ArrayType(StringType()), True, {"comment": ""}),
     StructField("element", StringType(), True, {"comment": ""}),
-    StructField("android_mac_sha1", StringType(), True, {"comment": ""}),
     StructField("connection_type", StringType(), True, {"comment": "connection, e.g. lan, wwan, wifi, offline	"}),
     StructField("engine_version", StringType(), True, {"comment": "engine version"}),
-    # StructField("google_aid", StringType(), True, {"comment": "Android advertising id	"}),
-    # StructField("google_aid_src", StringType(), True, {"comment": ""}),
+    StructField("google_aid", StringType(), True, {"comment": "Android advertising id	"}),
+    StructField("google_aid_src", StringType(), True, {"comment": ""}),
     StructField("ios_app_build", StringType(), True, {"comment": ""}),
     StructField("ios_app_version", StringType(), True, {"comment": ""}),
     StructField("ios_att", StringType(), True, {"comment": ""}),
@@ -1361,7 +1453,10 @@ error_schema = StructType([
     StructField("oaid", StringType(), True, {"comment": ""}),
     StructField("user_id_ext", StringType(), True, {"comment": ""}),
     StructField("message", StringType(), True, {"comment": ""}),
-    StructField("severity", StringType(), True, {"comment": ""})
+    StructField("severity", StringType(), True, {"comment": ""}),
+    StructField("custom_01", StringType(), True, {"comment": "Custom field 1"}),
+    StructField("custom_02", StringType(), True, {"comment": "Custom field 2"}),
+    StructField("custom_03", StringType(), True, {"comment": "Custom field 3"}),
 
 ])
 
@@ -1380,7 +1475,7 @@ def error():
   return (
     dlt.read("events")
     .filter(F.col("data").contains('"category":"error"'))
-    .withColumn("user_meta", F.from_json("user_meta", user_meta_schema))
+    .withColumn("user_meta", F.from_json("user_meta", error_user_meta_schema))
     .withColumn("data", F.from_json("data", error_data_schema))
     .withColumn("arrival_ts", F.to_timestamp(F.from_unixtime(F.col("arrival_ts"))))
     .withColumn("install_campaign", F.col("user_meta.install_campaign"))
@@ -1390,7 +1485,7 @@ def error():
     .withColumn("pay_ft", F.col("user_meta.pay_ft"))
     .withColumn("attribution_partner", F.col("user_meta.attribution_partner"))
     .withColumn("revenue", F.col("user_meta.revenue"))
-    .withColumn("cohort_month", F.from_unixtime(F.col("user_meta.cohort_month"), 'yyyy-MM'))
+    .withColumn("cohort_month", F.from_unixtime(F.col("user_meta.cohort_month"), "yyyy-MM"))
     .withColumn("is_converting", F.col("user_meta.is_converting"))
     .withColumn("cohort_week", F.from_unixtime(F.col("user_meta.cohort_week")))
     .withColumn("first_build", F.col("user_meta.first_build"))
@@ -1408,22 +1503,22 @@ def error():
     .withColumn("manufacturer", F.col("data.manufacturer"))
     .withColumn("platform", F.col("data.platform"))
     .withColumn("device", F.col("data.device"))
-    # .withColumn("ab_id", F.col("data.ab_id"))
-    # .withColumn("ab_variant_id", F.col("data.ab_variant_id"))
-    # .withColumn("android_app_build", F.col("data.android_app_build"))
-    # .withColumn("android_app_signature", F.col("data.android_app_signature"))
-    # .withColumn("android_app_version", F.col("data.android_app_version"))
-    # .withColumn("android_bundle_id", F.col("data.android_bundle_id"))
-    # .withColumn("android_channel_id", F.col("data.android_channel_id"))
-    # .withColumn("android_id", F.col("data.android_id"))
-    # .withColumn("android_mac_md5", F.col("data.android_mac_md5"))
-    # .withColumn("android_mac_sha1", F.col("data.android_mac_sha1"))
+    .withColumn("ab_id", F.col("data.ab_id"))
+    .withColumn("ab_variant_id", F.col("data.ab_variant_id"))
+    .withColumn("android_app_build", F.col("data.android_app_build"))
+    .withColumn("android_app_signature", F.col("data.android_app_signature"))
+    .withColumn("android_app_version", F.col("data.android_app_version"))
+    .withColumn("android_bundle_id", F.col("data.android_bundle_id"))
+    .withColumn("android_channel_id", F.col("data.android_channel_id"))
+    .withColumn("android_id", F.col("data.android_id"))
+    .withColumn("android_mac_md5", F.col("data.android_mac_md5"))
+    .withColumn("android_mac_sha1", F.col("data.android_mac_sha1"))
     .withColumn("configuration_keys", F.col("data.configuration_keys"))
     .withColumn("configurations", F.col("data.configurations"))
     .withColumn("connection_type", F.col("data.connection_type"))
     .withColumn("engine_version", F.col("data.engine_version"))
-    # .withColumn("google_aid", F.col("data.google_aid"))
-    # .withColumn("google_aid_src", F.col("data.google_aid_src"))
+    .withColumn("google_aid", F.col("data.google_aid"))
+    .withColumn("google_aid_src", F.col("data.google_aid_src"))
     .withColumn("ios_app_build", F.col("data.ios_app_build"))
     .withColumn("ios_app_version", F.col("data.ios_app_version"))
     .withColumn("ios_att", F.col("data.ios_att"))
@@ -1435,7 +1530,10 @@ def error():
     .withColumn("user_id_ext", F.col("data.user_id_ext"))
     .withColumn("message", F.col("data.message"))
     .withColumn("severity", F.col("data.severity"))
-    .drop('file_path','file_modification_time','user_meta','data')
+    .withColumn("custom_01", F.col("data.custom_01"))
+    .withColumn("custom_02", F.col("data.custom_02"))
+    .withColumn("custom_03", F.col("data.custom_03"))
+    .drop("file_path","file_modification_time","user_meta","data")
   )
 
 # COMMAND ----------
@@ -1445,7 +1543,7 @@ def error():
 
 # COMMAND ----------
 
-user_meta_schema = StructType([
+business_user_meta_schema = StructType([
   StructField("attribution_partner", StringType(), True),
   StructField("cohort_month", LongType(), True),
   StructField("cohort_week", LongType(), True),
@@ -1455,12 +1553,12 @@ user_meta_schema = StructType([
   StructField("install_publisher", StringType(), True),
   StructField("install_site", StringType(), True),
   StructField("install_ts", LongType(), True),
-  StructField("is_converting", StringType(), True),
-  StructField("is_paying", StringType(), True),
+  StructField("is_converting", BooleanType(), True),
+  StructField("is_paying", BooleanType(), True),
   StructField("origin", StringType(), True),
   StructField("pay_ft", LongType(), True),
   StructField("receipt_status", StringType(), True),
-  StructField("revenue", StringType(), True)
+  StructField("revenue", DoubleType(), True)
 ])
 
 business_data_schema = StructType([
@@ -1515,7 +1613,10 @@ business_data_schema = StructType([
     StructField("transaction_num", LongType(), True),
     StructField("user_id", StringType(), True),
     StructField("user_id_ext", StringType(), True),
-    StructField("v", LongType(), True)
+    StructField("v", LongType(), True),
+    StructField("custom_01", StringType(), True),
+    StructField("custom_02", StringType(), True),
+    StructField("custom_03", StringType(), True),
 ])
 
 business_schema = StructType([
@@ -1524,19 +1625,22 @@ business_schema = StructType([
     StructField("first_in_batch", BooleanType(), True, {"comment": ""}),
     StructField("country_code", StringType(), True, {"comment": "Country code for the player's country based on events (please note this may change day on day if the player is travelling)"}),
     StructField("arrival_ts", TimestampType(), True, {"comment": "Timestamp for which the event arrived at GA (discrepancy might be for users being offline, for example)"}),
-    StructField("is_paying", StringType(), True, {"comment": ""}),
+    StructField("install_campaign", StringType(), True, {"comment": ""}),
+    StructField("install_adgroup", StringType(), True, {"comment": ""}),
+    StructField("install_publisher", StringType(), True, {"comment": ""}),
+    StructField("install_site", StringType(), True, {"comment": ""}),
+    StructField("is_paying", BooleanType(), True, {"comment": ""}),
     StructField("origin", StringType(), True, {"comment": ""}),
     StructField("pay_ft", LongType(), True, {"comment": ""}),
-    StructField("revenue", StringType(), True, {"comment": ""}),
-    StructField("cohort_month", StringType(), True, {"comment": "First day of the month the player installed the game	"}),
-    StructField("is_converting", StringType(), True, {"comment": "Flag indicating whether it's the first time the player is making a payment (since we have history of it)	"}),
-    StructField("cohort_week", StringType(), True, {"comment": "First day of the week the player installed the game	"}),
+    StructField("site_id", StringType(), True, {"comment": ""}),
     StructField("attribution_partner", StringType(), True, {"comment": ""}),
+    StructField("revenue", DoubleType(), True, {"comment": ""}),
+    StructField("cohort_month", StringType(), True, {"comment": "First day of the month the player installed the game	"}),
+    StructField("is_converting", BooleanType(), True, {"comment": "Flag indicating whether it's the first time the player is making a payment (since we have history of it)	"}),
+    StructField("cohort_week", StringType(), True, {"comment": "First day of the week the player installed the game	"}),
     StructField("first_build", StringType(), True, {"comment": ""}),
     StructField("install_ts", TimestampType(), True, {"comment": "Date the player installed the game"}),
     StructField("install_hour", TimestampType(), True, {"comment": ""}),
-    StructField("install_campaign", StringType(), True, {"comment": ""}),
-    StructField("install_site", StringType(), True, {"comment": ""}),
     StructField("receipt_status", StringType(), True, {"comment": ""}),
     StructField("session_id", StringType(), True, {"comment": "Session's unique identifier"}),
     StructField("os_version", StringType(), True, {"comment": "Device's OS version"}),
@@ -1550,24 +1654,23 @@ business_schema = StructType([
     StructField("manufacturer", StringType(), True, {"comment": "Device's manufacturer"}),
     StructField("platform", StringType(), True, {"comment": "Platform e.g. ios, android	"}),
     StructField("device", StringType(), True, {"comment": "Device model"}),
-    # StructField("ab_id", StringType(), True, {"comment": "A/B Testing experiment identifier in case the player is participating in an A/B Test"}),
-    # StructField("ab_variant_id", StringType(), True, {"comment": "A/B Testing variant identifier in case the player is participating in an A/B Test"}),
-    # StructField("android_app_build", StringType(), True, {"comment": ""}),
-    # StructField("android_app_signature", StringType(), True, {"comment": ""}),
-    # StructField("android_app_version", StringType(), True, {"comment": ""}),
-    # StructField("android_bundle_id", StringType(), True, {"comment": ""}),
-    # StructField("android_channel_id", StringType(), True, {"comment": ""}),
-    # StructField("android_id", StringType(), True, {"comment": "Android id	"}), #find a better defintion
-    # StructField("android_mac_md5", StringType(), True, {"comment": ""}),
-    # StructField("android_mac_sha1", StringType(), True, {"comment": ""}),
+    StructField("ab_id", StringType(), True, {"comment": "A/B Testing experiment identifier in case the player is participating in an A/B Test"}),
+    StructField("ab_variant_id", StringType(), True, {"comment": "A/B Testing variant identifier in case the player is participating in an A/B Test"}),
+    StructField("android_app_build", StringType(), True, {"comment": ""}),
+    StructField("android_app_signature", StringType(), True, {"comment": ""}),
+    StructField("android_app_version", StringType(), True, {"comment": ""}),
+    StructField("android_bundle_id", StringType(), True, {"comment": ""}),
+    StructField("android_channel_id", StringType(), True, {"comment": ""}),
+    StructField("android_id", StringType(), True, {"comment": "Android id	"}), #find a better defintion
+    StructField("android_mac_md5", StringType(), True, {"comment": ""}),
+    StructField("android_mac_sha1", StringType(), True, {"comment": ""}),
     StructField("configuration_keys", ArrayType(StringType()), True, {"comment": ""}),
     StructField("configurations", ArrayType(StringType()), True, {"comment": ""}),
     StructField("element", StringType(), True, {"comment": ""}),
-    StructField("android_mac_sha1", StringType(), True, {"comment": ""}),
     StructField("connection_type", StringType(), True, {"comment": "connection, e.g. lan, wwan, wifi, offline	"}),
     StructField("engine_version", StringType(), True, {"comment": "engine version"}),
-    # StructField("google_aid", StringType(), True, {"comment": "Android advertising id	"}),
-    # StructField("google_aid_src", StringType(), True, {"comment": ""}),
+    StructField("google_aid", StringType(), True, {"comment": "Android advertising id	"}),
+    StructField("google_aid_src", StringType(), True, {"comment": ""}),
     StructField("ios_app_build", StringType(), True, {"comment": ""}),
     StructField("ios_app_version", StringType(), True, {"comment": ""}),
     StructField("ios_att", StringType(), True, {"comment": ""}),
@@ -1587,7 +1690,10 @@ business_schema = StructType([
     StructField("receipt", StringType(), True, {"comment": ""}),
     StructField("receipt_id", StringType(), True, {"comment": ""}),
     StructField("signature", StringType(), True, {"comment": ""}),
-    StructField("store", StringType(), True, {"comment": ""})
+    StructField("store", StringType(), True, {"comment": ""}),
+    StructField("custom_01", StringType(), True, {"comment": "Custom field 1"}),
+    StructField("custom_02", StringType(), True, {"comment": "Custom field 2"}),
+    StructField("custom_03", StringType(), True, {"comment": "Custom field 3"}),
 
 ])
 
@@ -1605,8 +1711,8 @@ Refer to GameAnalytics [documentation](https://docs.gameanalytics.com/event-type
 def business_():
   return (
     dlt.read("events")
-    .filter(F.col("data").contains('"category":"business"'))
-    .withColumn("user_meta", F.from_json("user_meta", user_meta_schema))
+    .filter(F.col("data").contains('category":"business"'))
+    .withColumn("user_meta", F.from_json("user_meta", business_user_meta_schema))
     .withColumn("data", F.from_json("data", business_data_schema))
     .withColumn("arrival_ts", F.to_timestamp(F.from_unixtime(F.col("arrival_ts"))))
     .withColumn("install_campaign", F.col("user_meta.install_campaign"))
@@ -1616,7 +1722,7 @@ def business_():
     .withColumn("pay_ft", F.col("user_meta.pay_ft"))
     .withColumn("attribution_partner", F.col("user_meta.attribution_partner"))
     .withColumn("revenue", F.col("user_meta.revenue"))
-    .withColumn("cohort_month", F.from_unixtime(F.col("user_meta.cohort_month"), 'yyyy-MM'))
+    .withColumn("cohort_month", F.from_unixtime(F.col("user_meta.cohort_month"), "yyyy-MM"))
     .withColumn("is_converting", F.col("user_meta.is_converting"))
     .withColumn("cohort_week", F.from_unixtime(F.col("user_meta.cohort_week")))
     .withColumn("first_build", F.col("user_meta.first_build"))
@@ -1634,22 +1740,22 @@ def business_():
     .withColumn("manufacturer", F.col("data.manufacturer"))
     .withColumn("platform", F.col("data.platform"))
     .withColumn("device", F.col("data.device"))
-    # .withColumn("ab_id", F.col("data.ab_id"))
-    # .withColumn("ab_variant_id", F.col("data.ab_variant_id"))
-    # .withColumn("android_app_build", F.col("data.android_app_build"))
-    # .withColumn("android_app_signature", F.col("data.android_app_signature"))
-    # .withColumn("android_app_version", F.col("data.android_app_version"))
-    # .withColumn("android_bundle_id", F.col("data.android_bundle_id"))
-    # .withColumn("android_channel_id", F.col("data.android_channel_id"))
-    # .withColumn("android_id", F.col("data.android_id"))
-    # .withColumn("android_mac_md5", F.col("data.android_mac_md5"))
-    # .withColumn("android_mac_sha1", F.col("data.android_mac_sha1"))
+    .withColumn("ab_id", F.col("data.ab_id"))
+    .withColumn("ab_variant_id", F.col("data.ab_variant_id"))
+    .withColumn("android_app_build", F.col("data.android_app_build"))
+    .withColumn("android_app_signature", F.col("data.android_app_signature"))
+    .withColumn("android_app_version", F.col("data.android_app_version"))
+    .withColumn("android_bundle_id", F.col("data.android_bundle_id"))
+    .withColumn("android_channel_id", F.col("data.android_channel_id"))
+    .withColumn("android_id", F.col("data.android_id"))
+    .withColumn("android_mac_md5", F.col("data.android_mac_md5"))
+    .withColumn("android_mac_sha1", F.col("data.android_mac_sha1"))
     .withColumn("configuration_keys", F.col("data.configuration_keys"))
     .withColumn("configurations", F.col("data.configurations"))
     .withColumn("connection_type", F.col("data.connection_type"))
     .withColumn("engine_version", F.col("data.engine_version"))
-    # .withColumn("google_aid", F.col("data.google_aid"))
-    # .withColumn("google_aid_src", F.col("data.google_aid_src"))
+    .withColumn("google_aid", F.col("data.google_aid"))
+    .withColumn("google_aid_src", F.col("data.google_aid_src"))
     .withColumn("ios_app_build", F.col("data.ios_app_build"))
     .withColumn("ios_app_version", F.col("data.ios_app_version"))
     .withColumn("ios_att", F.col("data.ios_att"))
@@ -1670,5 +1776,8 @@ def business_():
     .withColumn("receipt_id", F.col("data.receipt_info.receipt_id"))
     .withColumn("signature", F.col("data.receipt_info.signature"))
     .withColumn("store", F.col("data.receipt_info.store"))
-    .drop('file_path','file_modification_time','user_meta','data')
+    .withColumn("custom_01", F.col("data.custom_01"))
+    .withColumn("custom_02", F.col("data.custom_02"))
+    .withColumn("custom_03", F.col("data.custom_03"))
+    .drop("file_path","file_modification_time","user_meta","data")
   )
