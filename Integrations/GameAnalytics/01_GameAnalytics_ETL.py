@@ -110,7 +110,7 @@ The events table parses out top level keys of the JSON payload.
   )
 def events():
   return (
-    dlt.read("raw")
+    dlt.read_stream("raw")
       .withColumn("value", F.from_json("value", payload_schema))
       .withColumn("user_meta", F.col("value.user_meta"))
       .withColumn("ip", F.col("value.ip"))
@@ -233,7 +233,7 @@ Refer to GameAnalytics [documentation](https://restapidocs.gameanalytics.com/?_g
   )
 def session_end():
   return (
-    dlt.read("events")
+    dlt.read_stream("events")
     .filter(F.col("data").contains('"category":"session_end"'))
     .withColumn("user_meta", F.from_json("user_meta", session_end_user_meta_schema))
     .withColumn("data", F.from_json("data", session_end_data_schema))
@@ -367,7 +367,7 @@ Refer to GameAnalytics [documentation](https://restapidocs.gameanalytics.com/?js
   )
 def user():
   return (
-    dlt.read("events")
+    dlt.read_stream("events")
     .filter(F.col("data").contains('category":"user"'))
     .withColumn("user_meta", F.from_json("user_meta", user_user_meta_schema))
     .withColumn("data", F.from_json("data", user_data_schema))
@@ -567,7 +567,7 @@ Refer to GameAnalytics [documentation](https://docs.gameanalytics.com/event-type
 @dlt.expect_or_fail("valid_progression_status", "progression_status IN (\"Start\", \"Complete\", \"Fail\")")
 def progression():
   return (
-    dlt.read("events")
+    dlt.read_stream("events")
     .filter(F.col("data").contains('"category":"progression"'))
     .withColumn("user_meta", F.from_json("user_meta", progression_user_meta_schema))
     .withColumn("data", F.from_json("data", progression_data_schema))
@@ -794,7 +794,7 @@ Refer to GameAnalytics [documentation](https://docs.gameanalytics.com/event-type
 @dlt.expect("valid_ad_action", "ad_action IN ('clicked', 'show', 'failed_show', 'reward_received')")
 def ads():
   return (
-    dlt.read("events")
+    dlt.read_stream("events")
     .filter(F.col("data").contains('category":"ads"'))
     .withColumn("user_meta", F.from_json("user_meta", ads_user_meta_schema))
     .withColumn("data", F.from_json("data", ads_data_schema))
@@ -983,7 +983,7 @@ Refer to GameAnalytics [documentation](https://docs.gameanalytics.com/event-type
 @dlt.expect("valid_flow_type", "flow_type IN ('Sink', 'Source')")
 def resource():
   return (
-    dlt.read("events")
+    dlt.read_stream("events")
     .filter(F.col("data").contains('"category":"resource"'))
     .withColumn("user_meta", F.from_json("user_meta", resource_user_meta_schema))
     .withColumn("data", F.from_json("data", resource_data_schema))
@@ -1232,7 +1232,7 @@ Refer to GameAnalytics [documentation](https://docs.gameanalytics.com/event-type
   )
 def impression():
   return (
-    dlt.read("events")
+    dlt.read_stream("events")
     .filter(F.col("data").contains('"category":"impression"'))
     .withColumn("user_meta", F.from_json("user_meta", impression_user_meta_schema))
     .withColumn("data", F.from_json("data", impression_data_schema))
@@ -1473,7 +1473,7 @@ Refer to GameAnalytics [documentation](https://docs.gameanalytics.com/event-type
   )
 def error():
   return (
-    dlt.read("events")
+    dlt.read_stream("events")
     .filter(F.col("data").contains('"category":"error"'))
     .withColumn("user_meta", F.from_json("user_meta", error_user_meta_schema))
     .withColumn("data", F.from_json("data", error_data_schema))
@@ -1710,7 +1710,7 @@ Refer to GameAnalytics [documentation](https://docs.gameanalytics.com/event-type
   )
 def business_():
   return (
-    dlt.read("events")
+    dlt.read_stream("events")
     .filter(F.col("data").contains('category":"business"'))
     .withColumn("user_meta", F.from_json("user_meta", business_user_meta_schema))
     .withColumn("data", F.from_json("data", business_data_schema))
