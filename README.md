@@ -27,7 +27,6 @@ The project relies on various open-source libraries for data processing, visuali
 |-----------------|---------------------------------------------------------------------------|----------------|----------------------------------------------------------|
 | IPython         | Interactive computing and development environment                         | BSD License    | [IPython](https://github.com/ipython/ipython)            |
 | demoji          | Demojification: removing emojis from text                                | MIT License    | [demoji](https://github.com/bsolomon1124/demoji)         |
-| dlt             | Databricks Labs Delta Lake, an open-source storage layer                  | Apache 2.0     | [dlt](https://github.com/delta-io/delta)                 |
 | hyperopt        | Optimization over complex search spaces, primarily for ML tuning         | BSD License    | [hyperopt](https://github.com/hyperopt/hyperopt)         |
 | json            | JSON encoder and decoder                                                 | Python License | [json](https://docs.python.org/3/library/json.html)      |
 | matplotlib      | Plotting and visualization library                                       | PSF License    | [matplotlib](https://github.com/matplotlib/matplotlib)   |
