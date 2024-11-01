@@ -435,6 +435,9 @@ for col_name in predictions.columns:
 # Rearrange the columns in the desired order
 desired_order = ["Feature", "Cluster"] + [c for c in Cluster_Metrics.columns if c not in ["Feature", "Cluster"]]
 Cluster_Metrics = Cluster_Metrics.select(desired_order)
+
+Cluster_Metrics.write.format("delta").mode("overwrite").saveAsTable("games_solutions.galactic_frontiers")
+
 display(Cluster_Metrics)
 
 # COMMAND ----------
