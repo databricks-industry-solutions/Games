@@ -216,7 +216,3 @@ _ = spark.sql(f"DROP TABLE IF EXISTS {database_name}.steam_reviews_bronze")
 reviewsDF_filtered.write \
     .format("delta") \
     .saveAsTable(f"{database_name}.steam_reviews_bronze")
-
-# COMMAND ----------
-
-
