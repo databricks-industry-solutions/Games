@@ -32,7 +32,7 @@ The project relies on various open-source libraries for data processing, visuali
 | matplotlib      | Plotting and visualization library                                       | PSF License    | [matplotlib](https://github.com/matplotlib/matplotlib)   |
 | mlflow          | Experiment tracking and model management for ML projects                 | Apache 2.0     | [mlflow](https://github.com/mlflow/mlflow)               |
 | numpy           | Core library for scientific computing with Python                        | BSD License    | [numpy](https://github.com/numpy/numpy)                  |
-| openai          | API access to OpenAI's language models                                   | Proprietary    | [openai](https://github.com/openai/openai-python)        |
+| openai          | API access to OpenAI's language models                                   | MIT License    | [openai](https://github.com/openai/openai-python)        |
 | os              | Operating system interface, part of the Python Standard Library          | Python License | [os](https://docs.python.org/3/library/os.html)          |
 | pandas          | Data manipulation and analysis library                                   | BSD License    | [pandas](https://github.com/pandas-dev/pandas)           |
 | pyspark         | Interface for Apache Spark in Python                                     | Apache 2.0     | [pyspark](https://spark.apache.org/docs/latest/api/python/) |
